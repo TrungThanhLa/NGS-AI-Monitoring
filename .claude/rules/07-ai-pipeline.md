@@ -30,6 +30,15 @@ EMOTION_GROUPS = ["Trust", "Fear", "Anger", "Surprise", "Sadness", "Happy"]
 
 ---
 
+## Prompt versioning
+
+Prompt được lưu thành file versioned trong `backend/ai/prompts/` (`v1.py`, `v2.py`...) — **không sửa đè file cũ** khi tinh chỉnh prompt ở Slice 3+, luôn thêm file mới với `PROMPT_VERSION` tăng dần. Mỗi bản ghi `article_analysis` lưu `prompt_version` đã dùng (cột NOT NULL, xem [03 · Database Schema](.claude/rules/03-database-schema.md)) — để không lẫn kết quả giữa các lần tinh chỉnh prompt.
+
+```python
+# backend/ai/prompts/v1.py
+PROMPT_VERSION = 1
+```
+
 ## Ollama prompt template
 
 ```python
@@ -77,6 +86,7 @@ async def analyze_article(title: str, content: str) -> dict:
     result = json.loads(raw.strip())
     if result.get("confidence", 1.0) < 0.6:
         result["needs_review"] = True
+    result["prompt_version"] = PROMPT_VERSION  # từ backend/ai/prompts/v1.py — lưu kèm vào article_analysis
     return result
 ```
 

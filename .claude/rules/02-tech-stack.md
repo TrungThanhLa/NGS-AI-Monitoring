@@ -27,19 +27,21 @@ alwaysApply: true
 
 ```
 ngs-monitor/
-├── frontend/                  # Next.js app
+├── frontend/                  # Next.js app (+ tailwind/postcss/tsconfig ở root frontend/)
 │   ├── app/
 │   │   ├── page.tsx           # Màn hình tạo báo cáo (main)
-│   │   ├── history/page.tsx   # Lịch sử báo cáo
-│   │   └── admin/page.tsx     # Admin quản lý nguồn
-│   └── components/
-│       ├── SourceSidebar.tsx  # Sidebar chọn nguồn
-│       ├── DatePicker.tsx     # Date range + presets
-│       ├── SummaryCard.tsx    # Ước tính số bài & thời gian
-│       └── JobStatus.tsx      # Polling + progress
+│   │   ├── history/page.tsx   # Lịch sử báo cáo — Slice 5
+│   │   └── admin/page.tsx     # Admin quản lý nguồn — Slice 6
+│   ├── components/
+│   │   ├── SourceSidebar.tsx  # Sidebar chọn nguồn
+│   │   ├── DatePicker.tsx     # Date range + presets
+│   │   ├── SummaryCard.tsx    # Ước tính số bài & thời gian
+│   │   └── JobStatus.tsx      # Polling + progress
+│   └── Dockerfile
 │
 ├── backend/                   # FastAPI app
 │   ├── main.py
+│   ├── db.py                  # PostgreSQL connection
 │   ├── routers/
 │   │   ├── sources.py         # CRUD sources
 │   │   ├── reports.py         # Tạo job, download
@@ -54,17 +56,25 @@ ngs-monitor/
 │   │   └── article.py         # Article content parser
 │   ├── ai/
 │   │   ├── ollama_client.py   # Gọi Ollama API
-│   │   ├── prompt.py          # Prompt templates
+│   │   ├── prompts/           # Prompt versioned theo file: v1.py, v2.py...
+│   │   │   └── v1.py          # PROMPT_VERSION + CLASSIFICATION_PROMPT — không sửa đè, thêm file mới khi tinh chỉnh (Slice 3+)
 │   │   └── nlp.py             # underthesea NER/keyword
 │   ├── report/
 │   │   ├── aggregator.py      # Tổng hợp thống kê
 │   │   └── docx_generator.py  # python-docx engine
-│   ├── models/                # SQLAlchemy models
-│   └── db.py                  # PostgreSQL connection
+│   ├── models/                # SQLAlchemy models (1 file/bảng)
+│   ├── alembic/                # migration, env.py đọc DATABASE_URL từ env
+│   ├── alembic.ini
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── entrypoint.sh           # alembic upgrade head → uvicorn
 │
-├── storage/                   # File output (.docx, .json)
+├── storage/                   # File output (.docx, .json) — gitignored
 ├── templates/                 # DOCX template base
+├── ollama/
+│   └── entrypoint.sh           # ollama serve + auto-pull OLLAMA_MODEL
 ├── docker-compose.yml
+├── .env.example
 └── CLAUDE.md
 ```
 

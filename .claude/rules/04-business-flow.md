@@ -21,7 +21,7 @@ Admin cấu hình nguồn (ngoài luồng chính — làm 1 lần)
          Dedup SHA256(url) → insert bảng articles
          ↓
 [Bước 5] AI pipeline (per article):
-         Ollama API → Qwen3-14B Q4_K_M
+         Ollama API → qwen3:8b
          → topics[], keywords[], sentiment, emotion, confidence
          → flag needs_review nếu confidence < 0.6
          → lưu article_analysis
