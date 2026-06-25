@@ -1,0 +1,10 @@
+storage/*
+!storage/.gitkeep
+
+.env
+__pycache__/
+*.pyc
+.venv/
+
+node_modules/
+.next/
