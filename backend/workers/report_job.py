@@ -15,9 +15,28 @@ from backend.workers.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+def _parse_max_articles(raw: str | None) -> int | None:
+    # Để trống/không parse được/<= 0 → không giới hạn (None)
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
 def _crawl_sources(db, job: Job) -> None:
     delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
+    max_articles = _parse_max_articles(os.environ.get("MAX_ARTICLES_PER_JOB"))
+
+    def crawled_count() -> int:
+        return db.query(Article).filter_by(job_id=job.job_id).count()
+
     for source_id in job.source_ids:
+        if max_articles is not None and crawled_count() >= max_articles:
+            break
+
         source = db.get(Source, source_id)
         try:
             candidates = get_article_urls(source, job.date_from, job.date_to)
@@ -26,6 +45,9 @@ def _crawl_sources(db, job: Job) -> None:
             continue
 
         for candidate in candidates:
+            if max_articles is not None and crawled_count() >= max_articles:
+                break
+
             url_hash = compute_url_hash(candidate["url"])
             if db.query(Article).filter_by(url_hash=url_hash).first() is not None:
                 continue
@@ -45,6 +67,7 @@ def _crawl_sources(db, job: Job) -> None:
                     content_raw=parsed["content_raw"],
                     author=parsed["author"],
                     published_at=parsed["published_at"],
+                    crawl_duration_seconds=parsed.get("crawl_duration_seconds"),
                 )
             )
             db.commit()
@@ -73,6 +96,7 @@ def _analyze_articles(db, job: Job) -> None:
                 needs_review=result["needs_review"],
                 summary=result.get("summary"),
                 prompt_version=result["prompt_version"],
+                analysis_duration_seconds=result.get("analysis_duration_seconds"),
             )
         )
         article.status = "analyzed"
