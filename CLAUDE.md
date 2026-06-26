@@ -73,32 +73,17 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 > Cập nhật mục này khi có tiến độ hoặc quyết định mới — đây là log tổng hợp, không thay thế checklist chi tiết ở Roadmap dưới.
 
 ### Đã hoàn thành
-- Xác định scope MVP, tech stack, business flow 8 bước (rules 01–04)
-- Thiết kế DB schema đầy đủ 5 bảng, gồm field `emotion` (rule 03)
-- Định nghĩa API contract cho các endpoint chính (rule 05)
-- Viết rule crawler strategy, AI pipeline (8 nhóm chủ đề + 6 nhóm emotion), DOCX report flow, frontend UI mockup (rules 06–09)
-- Restructure roadmap từ 24-task/5-phase sang Slice 0 + 6 vertical slice
-- Pilot test thật ngoài code: khảo sát 40 kênh, crawl thử được 11/40 (file `Bao_cao_Du_lieu_Thuc_22-06-2026.docx`)
-- **Slice 0 — hạ tầng nền:** scaffold `backend/`+`frontend/`, Alembic migration 5 bảng, Celery+Redis+Flower, Ollama (model `qwen3:8b`), `docker-compose.yml` đủ healthcheck — verify thật, tất cả 7 service `healthy`
-- **Slice 1 — walking skeleton (1 nguồn VTV, đầu-cuối):** API `POST /api/reports/create`, crawler sitemap+article thật cho VTV (sitemap dạng index theo block 5 ngày), Ollama client phân loại bài viết thật, aggregator + DOCX/JSON generator, Celery task tuần tự, FE tối giản polling 3s — **đã commit vào `main`**, verify thật với dữ liệu VTV (104 bài crawl thật, AI phân tích thật qua `qwen3:8b`, DOCX/JSON hợp lệ), 20 unit test pass
-- **Mở rộng sau Slice 1** (trên branch `feature/live-crawl-cancel-benchmark`, **chưa merge `main`**), phát sinh từ phản hồi thực tế khi dùng thử UI, không nằm trong checklist gốc của Slice nào:
-  - Bảng crawl trực tiếp trên UI kèm benchmark thời gian thật (`GET /api/reports/{job_id}/articles`, đo `crawl_duration_seconds`/`analysis_duration_seconds` bằng `time.perf_counter()`)
-  - Hủy job đang chạy (`POST /api/reports/{job_id}/cancel`, Celery `revoke(terminate=True)`)
-  - Biến env `MAX_ARTICLES_PER_JOB` giới hạn số bài/job để test nhanh hơn (AI local CPU-only ~60-120s/bài)
-  - Khôi phục job đang theo dõi sau khi reload trang (F5) qua `sessionStorage`
-  - Sửa 2 bug xử lý lỗi: AI timeout từng làm fail cả job (giờ chỉ skip 1 bài), lỗi crawler (hết retry) từng bị bỏ qua âm thầm không log/không lưu (giờ insert row `status="error"`, hiện trên UI)
-  - 32 unit test pass (12 test mới), đã verify thật nhiều lần qua API/DB/Celery log với dữ liệu VTV thật
+- Xác định scope MVP, tech stack, business flow 8 bước, DB schema 5 bảng, API contract, rule crawler/AI/DOCX/FE (rules 01–09)
+- Pilot test thật ngoài code: khảo sát 40 kênh, crawl thử được 11/40 (`Bao_cao_Du_lieu_Thuc_22-06-2026.docx`)
+- **Slice 0 + Slice 1** (walking skeleton VTV) và **phần mở rộng** (bảng crawl trực tiếp/benchmark, Cancel, giới hạn test, khôi phục F5, fix 2 bug error-handling) — **đã merge `main`**, verify thật với dữ liệu VTV (104 bài crawl thật, AI phân tích thật qua `qwen3:8b`, DOCX/JSON hợp lệ), 32 unit test pass. Chi tiết từng phần xem Roadmap Slice 1 và bảng "Quyết định quan trọng" dưới
 
 ### Trạng thái hiện tại
-- **Slice 0 (hạ tầng nền): hoàn thành**, đã commit `main`
-- **Slice 1 (walking skeleton): hoàn thành**, đã commit `main` — xem chi tiết "Đã hoàn thành" trên
-- **Mở rộng Slice 1** (bảng crawl trực tiếp, Cancel, benchmark, giới hạn test, khôi phục F5, fix error-handling): code xong, verify thật xong, nằm trên branch `feature/live-crawl-cancel-benchmark`, **chưa merge `main`** (đã hỏi, user chọn "giữ nguyên, xử lý sau" ở bước finishing-branch)
+- Slice 0 + Slice 1 (gồm phần mở rộng): hoàn thành, đã merge `main`
 - Slice 2–6: chưa bắt đầu
 
 ### Bước tiếp theo
-1. Quyết định merge `feature/live-crawl-cancel-benchmark` vào `main` (hoặc tạo PR) khi sẵn sàng
-2. Xử lý các vấn đề tồn đọng ở mục "Vấn đề cần làm rõ" dưới (lỗi sub-sitemap vô hình trên UI, `AI_MAX_CONTENT_LENGTH` cắt cứng)
-3. Bắt đầu Slice 2: nhiều nguồn + listing-page fallback — xem chi tiết ở Roadmap dưới
+1. Xử lý vấn đề tồn đọng ở "Vấn đề cần làm rõ" dưới (lỗi sub-sitemap vô hình trên UI, `AI_MAX_CONTENT_LENGTH` cắt cứng)
+2. Bắt đầu Slice 2: nhiều nguồn + listing-page fallback — chi tiết ở Roadmap dưới
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
@@ -109,17 +94,16 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 | Admin UI (Slice 6) chỉ CRUD metadata nguồn (name/URL/active toggle), không cho thêm parsing rule qua UI | Mỗi nguồn mới có cấu trúc HTML khác nhau, cần dev viết CSS selector tay (`sources.parsing_rules`) — không tự động hóa qua UI ở MVP |
 | Đổi roadmap từ 24-task/5-phase (theo layer kỹ thuật) sang Slice 0 + 6 vertical slice (đầu-cuối) | Muốn chứng minh pipeline chạy thật càng sớm càng tốt (Slice 1), giảm rủi ro phát hiện lỗi tích hợp muộn; tổng scope/timeline không đổi, chỉ đổi thứ tự đóng gói |
 | Slice 1: 1 Celery task tuần tự duy nhất (`workers/report_job.py`), không tách `crawl_worker.py`/`ai_worker.py` riêng | Đơn giản, dễ debug cho walking skeleton; tách task riêng + batch parallelism để dành cho Slice 3 ("Batch processing + tối ưu tốc độ") |
-| `celery_task_id` lưu giá trị thật vào DB (tự sinh `uuid.uuid4()` trước khi gọi Celery), không suy ra từ `job_id` theo quy ước ngầm | Quy ước ngầm có rủi ro lệch mapping khi sau này có nhiều task/job (Slice 3) — lúc đó Cancel sẽ revoke nhầm/im lặng thất bại. Đã phát hiện thêm 1 race condition (gọi Celery trước khi commit `celery_task_id`) ở vòng review cuối — sửa bằng cách tự sinh task_id và commit DB trước khi gọi `apply_async` |
-| Giới hạn `MAX_ARTICLES_PER_JOB` chỉ qua biến env, không đưa lên UI thật | Đây là nhu cầu test/dev (AI local CPU-only rất chậm), không phải nhu cầu nhà nghiên cứu dùng sản phẩm; lộ lên UI thật có rủi ro tạo báo cáo thiếu dữ liệu mà người dùng không biết |
-| Khôi phục job sau F5 dùng `sessionStorage`, không dùng `localStorage` | Chỉ cần sống qua reload trong cùng tab, tự dọn khi đóng tab — tránh "job ma" lưu lại nhiều ngày như `localStorage` |
-| AI timeout (>120s) chỉ skip 1 bài, không fail cả job | Bug thật đã xảy ra: `_analyze_articles` chỉ bắt `ValueError`, không bắt `httpx.HTTPError` (timeout) → exception bay lên fail cả job, mất luôn báo cáo của các bài đã phân tích xong. Đã sửa bắt thêm `httpx.HTTPError` |
-| Crawler lỗi (hết retry) vẫn insert row `Article` với `status="error"` | Trước đây bỏ qua âm thầm, không log, không lưu — không ai biết có bài bị bỏ sót. Giờ hiện được trên bảng crawl trực tiếp ở FE (URL thay tên nếu không có title) |
+| `celery_task_id` tự sinh `uuid.uuid4()` + commit DB trước khi gọi Celery, không suy ra từ `job_id` | Tránh lệch mapping khi sau này có nhiều task/job (Slice 3) và tránh race condition (Cancel đọc `None` nếu task đã chạy trước khi DB commit) |
+| Giới hạn `MAX_ARTICLES_PER_JOB` chỉ qua biến env, không đưa lên UI thật | Nhu cầu test/dev (AI local rất chậm), không phải nhu cầu nhà nghiên cứu; lộ lên UI có rủi ro tạo báo cáo thiếu dữ liệu mà người dùng không biết |
+| Khôi phục job sau F5 dùng `sessionStorage`, không dùng `localStorage` | Chỉ cần sống qua reload trong cùng tab, tự dọn khi đóng tab — tránh "job ma" lưu nhiều ngày |
+| AI timeout (>120s) chỉ skip 1 bài, không fail cả job | Bug thật: code cũ chỉ bắt `ValueError`, không bắt `httpx.HTTPError` (timeout) → fail cả job, mất báo cáo của các bài đã phân tích xong |
+| Crawler lỗi (hết retry) vẫn insert row `Article` với `status="error"` | Trước đây bỏ qua âm thầm, không log/lưu gì — giờ hiện được trên bảng crawl trực tiếp ở FE |
 
 ### Vấn đề cần làm rõ (chưa chốt)
-- **Số nguồn ước tính ở Slice 2** ghi "8–10 nguồn thực tế" nhưng theo `content_survey.docx` (chỉ tính website) thực tế là ~11–12 nguồn, khớp kết quả pilot test 11/40 — chưa sửa lại số trong roadmap
-- **Lỗi sub-sitemap (khác lỗi article) vẫn vô hình trên UI** — khi cả 1 khối 5 ngày của sitemap VTV không tải được (hết retry), chỉ có log server (`logger.warning`), không có URL cụ thể nào để tạo row `status="error"` hiện lên UI — chưa quyết định có cần làm thêm (VD lưu "khoảng ngày bị bỏ sót" ở cấp job) hay chấp nhận log server là đủ
-- **`AI_MAX_CONTENT_LENGTH=2000` cắt cứng nội dung gửi AI** — bài dài hơn 2000 ký tự bị cắt mất phần cuối, AI không đọc được toàn bài — chưa quyết định giữ nguyên, tóm tắt trước khi cắt, hay tăng giới hạn (đánh đổi tốc độ/chi phí AI)
-- **Branch `feature/live-crawl-cancel-benchmark` chưa merge `main`** — cần quyết định thời điểm merge/PR
+- **Số nguồn ước tính ở Slice 2** ghi "8–10 nguồn thực tế" nhưng theo `content_survey.docx` thực tế là ~11–12 nguồn, khớp pilot test 11/40 — chưa sửa số trong roadmap
+- **Lỗi sub-sitemap (khác lỗi article) vẫn vô hình trên UI** — hết retry chỉ log server, không có URL cụ thể để tạo row `status="error"` — chưa quyết định có cần làm thêm hay log server là đủ
+- **`AI_MAX_CONTENT_LENGTH=2000` cắt cứng nội dung gửi AI** — bài dài hơn 2000 ký tự mất phần cuối — chưa quyết định giữ nguyên, tóm tắt trước khi cắt, hay tăng giới hạn
 
 ## Roadmap — Vertical Slices
 
@@ -140,8 +124,8 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 - [x] AI: gọi Ollama, parse JSON, lưu `article_analysis` (đủ field kể cả `emotion`, chưa cần tối ưu prompt 8 nhóm)
 - [x] Report: DOCX cơ bản (vài bảng chính) + export JSON raw data
 - [x] FE tối giản: 1 form chọn nguồn (hardcode) + date range → submit → polling status → download
-- **Verify:** chạy thử với 1 nguồn thực tế, ra được ≥1 file `.docx` + `.json` hợp lệ; `jobs.status` chuyển đúng `pending → running → completed` — **đã chạy thật (2026-06-25/26), 104 bài crawl thật từ VTV, AI phân tích thật qua `qwen3:8b`, DOCX/JSON hợp lệ, 20 unit test pass**
-- **Mở rộng thêm sau khi verify (branch `feature/live-crawl-cancel-benchmark`, chưa merge `main`):** bảng crawl trực tiếp + benchmark thời gian, hủy job (Cancel), giới hạn `MAX_ARTICLES_PER_JOB`, khôi phục job sau F5, fix AI timeout/crawler error-handling — xem "Quyết định quan trọng & lý do" và "Vấn đề cần làm rõ" ở trên
+- **Verify:** chạy thử với 1 nguồn thực tế, ra được ≥1 file `.docx` + `.json` hợp lệ; `jobs.status` chuyển đúng `pending → running → completed` — **đã chạy thật, 104 bài crawl thật từ VTV, AI phân tích thật qua `qwen3:8b`, DOCX/JSON hợp lệ, 32 unit test pass**
+- **Mở rộng thêm sau khi verify** (đã merge `main` cùng đợt): bảng crawl trực tiếp + benchmark thời gian, hủy job (Cancel), giới hạn `MAX_ARTICLES_PER_JOB`, khôi phục job sau F5, fix AI timeout/crawler error-handling — xem "Quyết định quan trọng & lý do" ở trên
 
 ### Slice 2 — Nhiều nguồn + listing-page fallback
 - [ ] Listing page crawler (fallback khi nguồn không có sitemap)
