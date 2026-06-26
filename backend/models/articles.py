@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, ForeignKey, String, TIMESTAMP, Text
+from sqlalchemy import Column, Float, ForeignKey, String, TIMESTAMP, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 
@@ -21,3 +21,4 @@ class Article(Base):
     published_at = Column(TIMESTAMP)
     crawled_at = Column(TIMESTAMP, server_default=func.now())
     status = Column(String(50), server_default="pending_analysis")
+    crawl_duration_seconds = Column(Float)

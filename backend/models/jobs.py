@@ -18,5 +18,6 @@ class Job(Base):
     output_docx = Column(Text)
     output_json = Column(Text)
     error_log = Column(Text)
+    celery_task_id = Column(String(255))
     created_at = Column(TIMESTAMP, server_default=func.now())
     completed_at = Column(TIMESTAMP)

@@ -24,3 +24,4 @@ class ArticleAnalysis(Base):
     # cần để không lẫn kết quả giữa các lần tinh chỉnh prompt ở Slice 3+.
     prompt_version = Column(Integer, nullable=False)
     analyzed_at = Column(TIMESTAMP, server_default=func.now())
+    analysis_duration_seconds = Column(Float)
