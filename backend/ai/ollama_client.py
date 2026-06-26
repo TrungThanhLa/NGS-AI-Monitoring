@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import time
 
 import httpx
 
@@ -29,6 +30,7 @@ def analyze_article(title: str, content: str, client: httpx.Client | None = None
     )
 
     try:
+        start = time.perf_counter()
         result = None
         last_error: Exception | None = None
         for _attempt in range(2):
@@ -47,6 +49,7 @@ def analyze_article(title: str, content: str, client: httpx.Client | None = None
 
         result["needs_review"] = result.get("confidence", 1.0) < confidence_threshold
         result["prompt_version"] = PROMPT_VERSION
+        result["analysis_duration_seconds"] = time.perf_counter() - start
         return result
     finally:
         if owns_client:

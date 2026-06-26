@@ -69,3 +69,11 @@ def test_raises_after_invalid_json_twice():
 
     with pytest.raises(ValueError):
         analyze_article("Tiêu đề", "Nội dung bài viết", client=client)
+
+
+def test_returns_analysis_duration_seconds():
+    client = _client_with_responses([VALID_JSON])
+
+    result = analyze_article("Tiêu đề", "Nội dung bài viết", client=client)
+
+    assert result["analysis_duration_seconds"] > 0
