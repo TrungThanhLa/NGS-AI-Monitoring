@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.models import Job, Source
+from backend.models import Article, ArticleAnalysis, Job, Source
 from backend.routers import reports
 
 
@@ -63,6 +63,7 @@ def test_create_returns_400_when_date_from_not_before_date_to(app_client, active
 
 def test_create_returns_job_id_and_triggers_celery_task(app_client, active_source, db_session):
     with patch("backend.routers.reports.run_report_job") as mock_task:
+        mock_task.delay.return_value.id = "fake-task-id"
         response = app_client.post(
             "/api/reports/create",
             json={"source_ids": [str(active_source.source_id)], "date_from": "2026-06-01", "date_to": "2026-06-30"},
@@ -76,6 +77,7 @@ def test_create_returns_job_id_and_triggers_celery_task(app_client, active_sourc
 
     job = db_session.get(Job, uuid.UUID(body["job_id"]))
     assert job is not None
+    assert job.celery_task_id == "fake-task-id"
     db_session.delete(job)
     db_session.commit()
 
@@ -113,3 +115,156 @@ def test_download_returns_404_when_job_does_not_exist(app_client):
     response = app_client.get(f"/api/reports/{uuid.uuid4()}/download")
 
     assert response.status_code == 404
+
+
+def test_articles_returns_list_with_durations(app_client, db_session):
+    job = Job(source_ids=[], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="running")
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        url="https://vtv.vn/bai-1",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Bài 1",
+        status="analyzed",
+        crawl_duration_seconds=1.5,
+    )
+    db_session.add(article)
+    db_session.flush()
+
+    db_session.add(
+        ArticleAnalysis(
+            article_id=article.article_id,
+            job_id=job.job_id,
+            topics=["A"],
+            sentiment="negative",
+            emotion="Fear",
+            confidence=0.9,
+            prompt_version=1,
+            analysis_duration_seconds=67.0,
+        )
+    )
+    db_session.commit()
+
+    try:
+        response = app_client.get(f"/api/reports/{job.job_id}/articles")
+
+        assert response.status_code == 200
+        body = response.json()["articles"]
+        assert len(body) == 1
+        assert body[0]["title"] == "Bài 1"
+        assert body[0]["crawl_duration_seconds"] == 1.5
+        assert body[0]["analysis_duration_seconds"] == 67.0
+        assert body[0]["total_duration_seconds"] == 68.5
+    finally:
+        db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).delete()
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_articles_shows_null_durations_when_not_yet_analyzed(app_client, db_session):
+    job = Job(source_ids=[], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="running")
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        url="https://vtv.vn/bai-2",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Bài 2",
+        status="pending_analysis",
+        crawl_duration_seconds=2.0,
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    try:
+        response = app_client.get(f"/api/reports/{job.job_id}/articles")
+
+        body = response.json()["articles"]
+        assert body[0]["crawl_duration_seconds"] == 2.0
+        assert body[0]["analysis_duration_seconds"] is None
+        assert body[0]["total_duration_seconds"] is None
+    finally:
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_articles_returns_404_when_job_does_not_exist(app_client):
+    response = app_client.get(f"/api/reports/{uuid.uuid4()}/articles")
+
+    assert response.status_code == 404
+
+
+def test_cancel_revokes_celery_task_and_sets_cancelled(app_client, db_session):
+    job = Job(
+        source_ids=[],
+        date_from=date(2026, 6, 1),
+        date_to=date(2026, 6, 30),
+        status="running",
+        celery_task_id="fake-task-id",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    try:
+        with patch("backend.routers.reports.celery_app") as mock_celery_app:
+            response = app_client.post(f"/api/reports/{job.job_id}/cancel")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+        mock_celery_app.control.revoke.assert_called_once_with("fake-task-id", terminate=True)
+
+        db_session.refresh(job)
+        assert job.status == "cancelled"
+    finally:
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_cancel_returns_400_when_job_already_completed(app_client, db_session):
+    job = Job(
+        source_ids=[],
+        date_from=date(2026, 6, 1),
+        date_to=date(2026, 6, 30),
+        status="completed",
+        celery_task_id="fake-task-id",
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    try:
+        with patch("backend.routers.reports.celery_app") as mock_celery_app:
+            response = app_client.post(f"/api/reports/{job.job_id}/cancel")
+
+        assert response.status_code == 400
+        mock_celery_app.control.revoke.assert_not_called()
+    finally:
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_cancel_returns_404_when_job_does_not_exist(app_client):
+    response = app_client.post(f"/api/reports/{uuid.uuid4()}/cancel")
+
+    assert response.status_code == 404
+
+
+def test_cancel_skips_revoke_when_celery_task_id_is_none(app_client, db_session):
+    job = Job(source_ids=[], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="pending")
+    db_session.add(job)
+    db_session.commit()
+
+    try:
+        with patch("backend.routers.reports.celery_app") as mock_celery_app:
+            response = app_client.post(f"/api/reports/{job.job_id}/cancel")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
+        mock_celery_app.control.revoke.assert_not_called()
+    finally:
+        db_session.delete(job)
+        db_session.commit()
