@@ -35,6 +35,7 @@ def fetch_article(
         max_retries = int(os.environ.get("CRAWLER_MAX_RETRIES", "3"))
 
     try:
+        start = time.perf_counter()
         response = None
         for attempt in range(max_retries):
             try:
@@ -64,6 +65,7 @@ def fetch_article(
             "content_raw": content_raw,
             "author": author,
             "published_at": published_at,
+            "crawl_duration_seconds": time.perf_counter() - start,
         }
     finally:
         if owns_client:

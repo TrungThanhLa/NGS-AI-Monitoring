@@ -58,3 +58,12 @@ def test_skips_after_retries_exhausted_on_network_error():
 
     assert result is None
     assert attempts["count"] == 3
+
+
+def test_returns_crawl_duration_seconds_excluding_outer_sleep():
+    client = _client_returning(FIXTURE_HTML)
+
+    result = fetch_article(ARTICLE_URL, VTV_PARSING_RULES, client=client)
+
+    assert result["crawl_duration_seconds"] > 0
+    assert result["crawl_duration_seconds"] < 1.0
