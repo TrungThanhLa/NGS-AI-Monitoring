@@ -5,6 +5,9 @@ import { useEffect, useState } from "react";
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 // UUID cố định seed sẵn cho nguồn VTV ở migration 0002_seed_vtv_source.py
 const VTV_SOURCE_ID = "00000000-0000-0000-0000-000000000001";
+// sessionStorage (không phải localStorage) — chỉ cần sống qua F5 trong cùng tab,
+// tự dọn khi đóng tab, tránh "job ma" lưu lại nhiều ngày
+const JOB_ID_STORAGE_KEY = "ngs_monitor_job_id";
 
 function todayMinus(days: number): string {
   const d = new Date();
@@ -40,6 +43,34 @@ export default function Home() {
   const [articles, setArticles] = useState<CrawledArticle[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  function updateStatus(data: JobStatus) {
+    setStatus(data);
+    if (!["pending", "running"].includes(data.status)) {
+      sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
+    }
+  }
+
+  // Khôi phục job đang theo dõi sau khi reload trang (F5) — đọc lại đúng job_id
+  // đã lưu trong sessionStorage, hỏi lại /status + /articles để dựng lại đúng
+  // UI (bảng crawl, nút Cancel, link download...) như trước khi reload.
+  useEffect(() => {
+    const savedJobId = sessionStorage.getItem(JOB_ID_STORAGE_KEY);
+    if (!savedJobId) return;
+    (async () => {
+      const [statusRes, articlesRes] = await Promise.all([
+        fetch(`${API_BASE}/api/reports/${savedJobId}/status`),
+        fetch(`${API_BASE}/api/reports/${savedJobId}/articles`),
+      ]);
+      if (!statusRes.ok) {
+        sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
+        return;
+      }
+      setJobId(savedJobId);
+      updateStatus(await statusRes.json());
+      if (articlesRes.ok) setArticles((await articlesRes.json()).articles);
+    })();
+  }, []);
+
   useEffect(() => {
     const activeStatuses = ["pending", "running"];
     if (!jobId || !status || !activeStatuses.includes(status.status)) return;
@@ -48,7 +79,7 @@ export default function Home() {
         fetch(`${API_BASE}/api/reports/${jobId}/status`),
         fetch(`${API_BASE}/api/reports/${jobId}/articles`),
       ]);
-      if (statusRes.ok) setStatus(await statusRes.json());
+      if (statusRes.ok) updateStatus(await statusRes.json());
       if (articlesRes.ok) setArticles((await articlesRes.json()).articles);
     }, 3000);
     return () => clearInterval(interval);
@@ -67,9 +98,10 @@ export default function Home() {
       return;
     }
     const data = await res.json();
+    sessionStorage.setItem(JOB_ID_STORAGE_KEY, data.job_id);
     setJobId(data.job_id);
     setArticles([]);
-    setStatus({ job_id: data.job_id, status: data.status, progress: { crawled: 0, analyzed: 0, total_estimated: 0 } });
+    updateStatus({ job_id: data.job_id, status: data.status, progress: { crawled: 0, analyzed: 0, total_estimated: 0 } });
   }
 
   async function handleCancel() {
@@ -77,7 +109,7 @@ export default function Home() {
     const res = await fetch(`${API_BASE}/api/reports/${status.job_id}/cancel`, { method: "POST" });
     if (res.ok) {
       const data = await res.json();
-      setStatus({ ...status, status: data.status });
+      updateStatus({ ...status, status: data.status });
     }
   }
 
