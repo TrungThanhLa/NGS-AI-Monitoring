@@ -30,15 +30,16 @@ def test_crawl_sources_stops_at_max_articles_per_job_limit(db_session, monkeypat
             "crawl_duration_seconds": 0.01,
         }
 
-    with patch("backend.workers.report_job.get_article_urls", return_value=candidates), patch(
-        "backend.workers.report_job.fetch_article", side_effect=fake_fetch_article
-    ), patch("backend.workers.report_job.time.sleep"):
-        _crawl_sources(db_session, job)
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=candidates), patch(
+            "backend.workers.report_job.fetch_article", side_effect=fake_fetch_article
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
 
-    count = db_session.query(Article).filter_by(job_id=job.job_id).count()
-    assert count == 2
-
-    db_session.query(Article).filter_by(job_id=job.job_id).delete()
-    db_session.delete(job)
-    db_session.delete(source)
-    db_session.commit()
+        count = db_session.query(Article).filter_by(job_id=job.job_id).count()
+        assert count == 2
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
