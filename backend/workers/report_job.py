@@ -3,6 +3,8 @@ import os
 import time
 from datetime import datetime
 
+import httpx
+
 from backend.ai.ollama_client import analyze_article
 from backend.crawler.article import compute_url_hash, fetch_article
 from backend.crawler.sitemap import get_article_urls
@@ -55,6 +57,17 @@ def _crawl_sources(db, job: Job) -> None:
             parsed = fetch_article(candidate["url"], source.parsing_rules)
             time.sleep(delay_seconds)
             if parsed is None:
+                logger.warning("Crawl lỗi (hết retry hoặc không parse được), đánh dấu error: %s", candidate["url"])
+                db.add(
+                    Article(
+                        job_id=job.job_id,
+                        source_id=source.source_id,
+                        url=candidate["url"],
+                        url_hash=url_hash,
+                        status="error",
+                    )
+                )
+                db.commit()
                 continue
 
             db.add(
@@ -78,7 +91,7 @@ def _analyze_articles(db, job: Job) -> None:
     for article in pending:
         try:
             result = analyze_article(article.title, article.content_raw)
-        except ValueError:
+        except (ValueError, httpx.HTTPError):
             logger.exception("AI phân tích lỗi cho bài %s", article.url)
             article.status = "error"
             db.commit()

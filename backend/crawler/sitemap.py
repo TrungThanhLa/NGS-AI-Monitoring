@@ -1,3 +1,4 @@
+import logging
 import os
 import re
 import time
@@ -5,6 +6,8 @@ from datetime import date, datetime
 
 import httpx
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 SUB_SITEMAP_NAME_RE = re.compile(r"sitemaps-(\d+)-(\d+)-(\d+)-(\d+)\.xml$")
 
@@ -32,6 +35,7 @@ def _fetch_with_retry(client: httpx.Client, url: str, max_retries: int) -> httpx
         except httpx.HTTPError:
             if attempt < max_retries - 1:
                 time.sleep(2**attempt)
+    logger.warning("Hết %d lượt thử, bỏ qua sub-sitemap: %s", max_retries, url)
     return None
 
 

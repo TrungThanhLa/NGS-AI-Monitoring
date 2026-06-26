@@ -23,7 +23,7 @@ type JobStatus = {
 };
 
 type CrawledArticle = {
-  title: string;
+  title: string | null;
   url: string;
   status: string;
   crawl_duration_seconds: number | null;
@@ -183,7 +183,7 @@ export default function Home() {
               <tr key={a.url} className="border-b">
                 <td className="p-1">
                   <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
-                    {a.title}
+                    {a.title || a.url}
                   </a>
                 </td>
                 <td className="p-1">{a.status}</td>
