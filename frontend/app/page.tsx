@@ -19,18 +19,37 @@ type JobStatus = {
   error_log?: string;
 };
 
+type CrawledArticle = {
+  title: string;
+  url: string;
+  status: string;
+  crawl_duration_seconds: number | null;
+  analysis_duration_seconds: number | null;
+  total_duration_seconds: number | null;
+};
+
+function formatSeconds(value: number | null): string {
+  return value === null ? "-" : `${value.toFixed(1)}s`;
+}
+
 export default function Home() {
   const [dateFrom, setDateFrom] = useState(todayMinus(7));
   const [dateTo, setDateTo] = useState(todayMinus(0));
   const [jobId, setJobId] = useState<string | null>(null);
   const [status, setStatus] = useState<JobStatus | null>(null);
+  const [articles, setArticles] = useState<CrawledArticle[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!jobId || status?.status === "completed" || status?.status === "failed") return;
+    const activeStatuses = ["pending", "running"];
+    if (!jobId || !status || !activeStatuses.includes(status.status)) return;
     const interval = setInterval(async () => {
-      const res = await fetch(`${API_BASE}/api/reports/${jobId}/status`);
-      if (res.ok) setStatus(await res.json());
+      const [statusRes, articlesRes] = await Promise.all([
+        fetch(`${API_BASE}/api/reports/${jobId}/status`),
+        fetch(`${API_BASE}/api/reports/${jobId}/articles`),
+      ]);
+      if (statusRes.ok) setStatus(await statusRes.json());
+      if (articlesRes.ok) setArticles((await articlesRes.json()).articles);
     }, 3000);
     return () => clearInterval(interval);
   }, [jobId, status?.status]);
@@ -49,13 +68,24 @@ export default function Home() {
     }
     const data = await res.json();
     setJobId(data.job_id);
+    setArticles([]);
     setStatus({ job_id: data.job_id, status: data.status, progress: { crawled: 0, analyzed: 0, total_estimated: 0 } });
   }
 
+  async function handleCancel() {
+    if (!status) return;
+    const res = await fetch(`${API_BASE}/api/reports/${status.job_id}/cancel`, { method: "POST" });
+    if (res.ok) {
+      const data = await res.json();
+      setStatus({ ...status, status: data.status });
+    }
+  }
+
   const disabled = !dateFrom || !dateTo || dateFrom >= dateTo;
+  const canCancel = status?.status === "pending" || status?.status === "running";
 
   return (
-    <main className="p-8 max-w-xl">
+    <main className="p-8 max-w-3xl">
       <h1 className="text-2xl font-bold mb-4">NGS Monitor</h1>
 
       <div className="mb-4">
@@ -90,13 +120,48 @@ export default function Home() {
           <p>
             Đã crawl: {status.progress.crawled} bài — Đã phân tích: {status.progress.analyzed} bài
           </p>
+          {canCancel && (
+            <button className="bg-red-600 text-white px-3 py-1 rounded mt-2" onClick={handleCancel}>
+              Cancel
+            </button>
+          )}
           {status.status === "completed" && (
             <a className="text-blue-600 underline" href={`${API_BASE}/api/reports/${status.job_id}/download`}>
               Tải báo cáo DOCX
             </a>
           )}
           {status.status === "failed" && <p className="text-red-600">Lỗi: {status.error_log}</p>}
+          {status.status === "cancelled" && <p className="text-gray-600">Job đã bị hủy.</p>}
         </div>
+      )}
+
+      {articles.length > 0 && (
+        <table className="mt-6 w-full text-sm border-collapse">
+          <thead>
+            <tr className="border-b text-left">
+              <th className="p-1">Tiêu đề</th>
+              <th className="p-1">Trạng thái</th>
+              <th className="p-1">Crawl</th>
+              <th className="p-1">Phân tích</th>
+              <th className="p-1">Tổng</th>
+            </tr>
+          </thead>
+          <tbody>
+            {articles.map((a) => (
+              <tr key={a.url} className="border-b">
+                <td className="p-1">
+                  <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
+                    {a.title}
+                  </a>
+                </td>
+                <td className="p-1">{a.status}</td>
+                <td className="p-1">{formatSeconds(a.crawl_duration_seconds)}</td>
+                <td className="p-1">{formatSeconds(a.analysis_duration_seconds)}</td>
+                <td className="p-1">{formatSeconds(a.total_duration_seconds)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </main>
   );
