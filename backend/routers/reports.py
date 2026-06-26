@@ -1,3 +1,4 @@
+import uuid
 from datetime import date
 from uuid import UUID
 
@@ -31,13 +32,17 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
     if any(not source.is_active for source in sources):
         raise HTTPException(status_code=400, detail="Có nguồn không active")
 
-    job = Job(source_ids=payload.source_ids, date_from=payload.date_from, date_to=payload.date_to)
+    task_id = str(uuid.uuid4())
+    job = Job(
+        source_ids=payload.source_ids,
+        date_from=payload.date_from,
+        date_to=payload.date_to,
+        celery_task_id=task_id,
+    )
     db.add(job)
     db.commit()
 
-    result = run_report_job.delay(str(job.job_id))
-    job.celery_task_id = result.id
-    db.commit()
+    run_report_job.apply_async(args=[str(job.job_id)], task_id=task_id)
 
     return {"job_id": str(job.job_id), "status": job.status}
 

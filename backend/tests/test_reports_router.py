@@ -65,7 +65,6 @@ def test_create_returns_job_id_and_triggers_celery_task(app_client, active_sourc
     job_id = None
     try:
         with patch("backend.routers.reports.run_report_job") as mock_task:
-            mock_task.delay.return_value.id = "fake-task-id"
             response = app_client.post(
                 "/api/reports/create",
                 json={"source_ids": [str(active_source.source_id)], "date_from": "2026-06-01", "date_to": "2026-06-30"},
@@ -76,11 +75,12 @@ def test_create_returns_job_id_and_triggers_celery_task(app_client, active_sourc
         assert body["status"] == "pending"
         assert "job_id" in body
         job_id = body["job_id"]
-        mock_task.delay.assert_called_once_with(job_id)
 
         job = db_session.get(Job, uuid.UUID(job_id))
         assert job is not None
-        assert job.celery_task_id == "fake-task-id"
+        assert job.celery_task_id is not None
+
+        mock_task.apply_async.assert_called_once_with(args=[job_id], task_id=job.celery_task_id)
     finally:
         if job_id is not None:
             job = db_session.get(Job, uuid.UUID(job_id))
