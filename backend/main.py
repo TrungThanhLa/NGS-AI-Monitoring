@@ -1,9 +1,20 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
 from backend.db import engine
+from backend.routers import reports
 
 app = FastAPI(title="NGS Monitor API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(reports.router)
 
 
 @app.get("/health")

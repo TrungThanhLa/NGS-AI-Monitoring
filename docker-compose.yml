@@ -46,6 +46,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
+      - ./backend:/app/backend
       - ./storage:/app/storage
       - ./templates:/app/templates
     depends_on:
@@ -66,6 +67,7 @@ services:
     command: celery -A backend.workers.celery_app worker --loglevel=info
     env_file: .env
     volumes:
+      - ./backend:/app/backend
       - ./storage:/app/storage
     depends_on:
       postgres:

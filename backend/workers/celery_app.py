@@ -10,3 +10,6 @@ celery_app = Celery("ngs_monitor", broker=REDIS_URL, backend=REDIS_URL)
 @celery_app.task(name="workers.ping_task")
 def ping_task():
     return "pong"
+
+
+from backend.workers import report_job  # noqa: E402,F401  đăng ký task run_report_job
