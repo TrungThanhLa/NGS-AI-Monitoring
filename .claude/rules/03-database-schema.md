@@ -23,33 +23,43 @@ CREATE TABLE sources (
 ### Bảng `jobs` — Trạng thái job
 ```sql
 CREATE TABLE jobs (
-    job_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    source_ids   UUID[] NOT NULL,
-    date_from    DATE NOT NULL,
-    date_to      DATE NOT NULL,
-    status       VARCHAR(50) DEFAULT 'pending', -- pending|running|completed|failed
-    output_docx  TEXT,                          -- Đường dẫn file .docx
-    output_json  TEXT,                          -- Đường dẫn file .json
-    error_log    TEXT,
-    created_at   TIMESTAMP DEFAULT NOW(),
-    completed_at TIMESTAMP
+    job_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_ids      UUID[] NOT NULL,
+    date_from       DATE NOT NULL,
+    date_to         DATE NOT NULL,
+    status          VARCHAR(50) DEFAULT 'pending', -- pending|running|completed|failed|cancelled
+    output_docx     TEXT,                          -- Đường dẫn file .docx
+    output_json     TEXT,                          -- Đường dẫn file .json
+    error_log       TEXT,
+    celery_task_id  VARCHAR(255),                  -- Task ID Celery thật (tự sinh trước khi
+                                                     -- gọi apply_async, KHÔNG suy ra từ job_id)
+                                                     -- — dùng để revoke khi hủy job (thêm ở
+                                                     -- migration 0003, Slice 1 mở rộng)
+    created_at      TIMESTAMP DEFAULT NOW(),
+    completed_at    TIMESTAMP
 );
 ```
 
 ### Bảng `articles` — Bài viết thu thập được
 ```sql
 CREATE TABLE articles (
-    article_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id        UUID REFERENCES jobs(job_id),
-    source_id     UUID REFERENCES sources(source_id),
-    url           TEXT NOT NULL,
-    url_hash      VARCHAR(64) UNIQUE NOT NULL,  -- SHA256(url) — dùng để dedup
-    title         TEXT,
-    content_raw   TEXT,                         -- Nội dung đã strip HTML
-    author        TEXT,
-    published_at  TIMESTAMP,
-    crawled_at    TIMESTAMP DEFAULT NOW(),
-    status        VARCHAR(50) DEFAULT 'pending_analysis' -- pending_analysis|analyzed|error
+    article_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id                UUID REFERENCES jobs(job_id),
+    source_id             UUID REFERENCES sources(source_id),
+    url                   TEXT NOT NULL,
+    url_hash              VARCHAR(64) UNIQUE NOT NULL,  -- SHA256(url) — dùng để dedup
+    title                 TEXT,                         -- NULL nếu status=error (crawl lỗi,
+                                                          -- không lấy được title)
+    content_raw           TEXT,                         -- Nội dung đã strip HTML
+    author                TEXT,
+    published_at          TIMESTAMP,
+    crawled_at            TIMESTAMP DEFAULT NOW(),
+    status                VARCHAR(50) DEFAULT 'pending_analysis', -- pending_analysis|analyzed|error
+    crawl_duration_seconds FLOAT                         -- Thời gian fetch+parse thật (giây),
+                                                          -- đo bằng time.perf_counter(), loại trừ
+                                                          -- sleep rate-limit (thêm ở migration 0003,
+                                                          -- Slice 1 mở rộng — phục vụ bảng crawl
+                                                          -- trực tiếp + benchmark trên FE)
 );
 ```
 
@@ -67,7 +77,10 @@ CREATE TABLE article_analysis (
     needs_review   BOOLEAN DEFAULT false,       -- true nếu confidence < 0.6
     summary        TEXT,
     prompt_version INT NOT NULL,                 -- version prompt đã sinh ra bản phân tích này (backend/ai/prompts/vN.py)
-    analyzed_at    TIMESTAMP DEFAULT NOW()
+    analyzed_at    TIMESTAMP DEFAULT NOW(),
+    analysis_duration_seconds FLOAT               -- Thời gian gọi Ollama thật (giây), đo bằng
+                                                   -- time.perf_counter() (thêm ở migration 0003,
+                                                   -- Slice 1 mở rộng — phục vụ benchmark trên FE)
 );
 ```
 

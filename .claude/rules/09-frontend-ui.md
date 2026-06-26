@@ -37,3 +37,13 @@ alwaysApply: false
 - Nút submit: disabled khi `source_ids.length === 0 OR date_from >= date_to`
 - Preset buttons: 7 / 30 / 90 / 150 ngày tính từ hôm nay
 - Job status polling mỗi 3 giây qua `GET /api/reports/{job_id}/status`
+
+---
+
+## Trạng thái thật đã code (Slice 1 + mở rộng) — khác mockup trên
+
+Mockup trên là thiết kế đích cho Slice 2 (nhiều nguồn, sidebar đầy đủ). Slice 1 hiện tại (`frontend/app/page.tsx`) chỉ là **form tối giản** theo đúng phạm vi roadmap Slice 1 (1 nguồn VTV hardcode), nhưng đã code thêm các phần sau (branch `feature/live-crawl-cancel-benchmark`, chưa merge `main`):
+
+- **Bảng crawl trực tiếp**: cập nhật theo cùng nhịp polling 3s, hiển thị danh sách bài đã crawl (link mở bài thật để tự kiểm chứng) kèm 3 cột benchmark thời gian (`crawl_duration_seconds`/`analysis_duration_seconds`/`total_duration_seconds`, gọi `GET /api/reports/{job_id}/articles`). Bài lỗi (`status="error"`) hiện URL thay tên vì không có title.
+- **Nút "Cancel"**: hiện khi `status` là `pending`/`running`, gọi `POST /api/reports/{job_id}/cancel`.
+- **Khôi phục sau reload (F5)**: `job_id` lưu vào `sessionStorage` lúc tạo job, tự đọc lại lúc mount để dựng lại đúng UI (bảng, nút Cancel, link download) — vì job chạy nền độc lập FE, reload trước đây làm mất hết khả năng theo dõi/hủy job dù job thật vẫn đang chạy.

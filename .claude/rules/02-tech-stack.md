@@ -43,13 +43,14 @@ ngs-monitor/
 │   ├── main.py
 │   ├── db.py                  # PostgreSQL connection
 │   ├── routers/
-│   │   ├── sources.py         # CRUD sources
-│   │   ├── reports.py         # Tạo job, download
-│   │   └── jobs.py            # Job status
+│   │   ├── sources.py         # CRUD sources (Slice 6, chưa code)
+│   │   └── reports.py         # Tạo job, status, articles (bảng crawl trực tiếp),
+│   │                          # cancel, download — gộp chung 1 router (Slice 1+)
 │   ├── workers/
 │   │   ├── celery_app.py      # Celery config
-│   │   ├── crawl_worker.py    # Task crawl
-│   │   └── ai_worker.py       # Task AI analysis
+│   │   └── report_job.py      # 1 task tuần tự: crawl → AI → report (Slice 1+;
+│   │                          # quyết định không tách crawl_worker/ai_worker riêng
+│   │                          # — xem CLAUDE.md "Quyết định quan trọng & lý do")
 │   ├── crawler/
 │   │   ├── sitemap.py         # Sitemap XML parser
 │   │   ├── listing.py         # Listing page fallback
