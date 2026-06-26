@@ -62,24 +62,31 @@ def test_create_returns_400_when_date_from_not_before_date_to(app_client, active
 
 
 def test_create_returns_job_id_and_triggers_celery_task(app_client, active_source, db_session):
-    with patch("backend.routers.reports.run_report_job") as mock_task:
-        mock_task.delay.return_value.id = "fake-task-id"
-        response = app_client.post(
-            "/api/reports/create",
-            json={"source_ids": [str(active_source.source_id)], "date_from": "2026-06-01", "date_to": "2026-06-30"},
-        )
+    job_id = None
+    try:
+        with patch("backend.routers.reports.run_report_job") as mock_task:
+            mock_task.delay.return_value.id = "fake-task-id"
+            response = app_client.post(
+                "/api/reports/create",
+                json={"source_ids": [str(active_source.source_id)], "date_from": "2026-06-01", "date_to": "2026-06-30"},
+            )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["status"] == "pending"
-    assert "job_id" in body
-    mock_task.delay.assert_called_once_with(body["job_id"])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "pending"
+        assert "job_id" in body
+        job_id = body["job_id"]
+        mock_task.delay.assert_called_once_with(job_id)
 
-    job = db_session.get(Job, uuid.UUID(body["job_id"]))
-    assert job is not None
-    assert job.celery_task_id == "fake-task-id"
-    db_session.delete(job)
-    db_session.commit()
+        job = db_session.get(Job, uuid.UUID(job_id))
+        assert job is not None
+        assert job.celery_task_id == "fake-task-id"
+    finally:
+        if job_id is not None:
+            job = db_session.get(Job, uuid.UUID(job_id))
+            if job is not None:
+                db_session.delete(job)
+                db_session.commit()
 
 
 def test_status_returns_progress_counts(app_client, db_session):
