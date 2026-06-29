@@ -15,6 +15,10 @@ CREATE TABLE sources (
     sitemap_url   TEXT,                         -- URL sitemap.xml nếu có
     listing_url   TEXT,                         -- URL trang danh sách bài (fallback)
     parsing_rules JSONB DEFAULT '{}',           -- CSS selector: {title, content, date, author}
+                                                  -- + key tùy chọn "engine": "crawl4ai" để dùng
+                                                  -- Crawl4AI tự nhận diện nội dung thay CSS
+                                                  -- selector (xem 06-crawler-strategy.md);
+                                                  -- không khai engine → mặc định httpx như cũ
     is_active     BOOLEAN DEFAULT true,
     created_at    TIMESTAMP DEFAULT NOW()
 );

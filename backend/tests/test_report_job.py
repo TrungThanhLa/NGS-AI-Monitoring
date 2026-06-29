@@ -21,7 +21,7 @@ def test_crawl_sources_stops_at_max_articles_per_job_limit(db_session, monkeypat
 
     candidates = [{"url": f"https://example.test/article-{i}", "lastmod": date(2026, 6, 1)} for i in range(5)]
 
-    def fake_fetch_article(url, parsing_rules, **kwargs):
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
         return {
             "url": url,
             "url_hash": f"hash-{url}",
@@ -33,8 +33,8 @@ def test_crawl_sources_stops_at_max_articles_per_job_limit(db_session, monkeypat
         }
 
     try:
-        with patch("backend.workers.report_job.get_article_urls", return_value=candidates), patch(
-            "backend.workers.report_job.fetch_article", side_effect=fake_fetch_article
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
         ), patch("backend.workers.report_job.time.sleep"):
             _crawl_sources(db_session, job)
 
@@ -61,8 +61,8 @@ def test_crawl_sources_inserts_error_row_when_fetch_article_returns_none(db_sess
     candidates = [{"url": "https://example.test/article-fail", "lastmod": date(2026, 6, 1)}]
 
     try:
-        with patch("backend.workers.report_job.get_article_urls", return_value=candidates), patch(
-            "backend.workers.report_job.fetch_article", return_value=None
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", return_value=None
         ), patch("backend.workers.report_job.time.sleep"):
             _crawl_sources(db_session, job)
 
@@ -71,6 +71,117 @@ def test_crawl_sources_inserts_error_row_when_fetch_article_returns_none(db_sess
         assert articles[0].status == "error"
         assert articles[0].url == "https://example.test/article-fail"
         assert articles[0].title is None
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_inserts_error_row_when_fetch_article_dispatch_raises(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    candidates = [
+        {"url": "https://example.test/article-raises", "lastmod": date(2026, 6, 1)},
+        {"url": "https://example.test/article-ok", "lastmod": date(2026, 6, 1)},
+    ]
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        if url == "https://example.test/article-raises":
+            raise ValueError("invalid isoformat string")
+        return {
+            "url": url,
+            "url_hash": f"hash-{url}",
+            "title": "Title",
+            "content_raw": "Content",
+            "author": None,
+            "published_at": None,
+            "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        articles = db_session.query(Article).filter_by(job_id=job.job_id).all()
+        assert len(articles) == 2
+        by_url = {a.url: a for a in articles}
+        assert by_url["https://example.test/article-raises"].status == "error"
+        assert by_url["https://example.test/article-ok"].status == "pending_analysis"
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_inserts_error_row_for_each_failed_sub_sitemap(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    failed_loc = "https://example.test/sitemaps/sitemaps-2026-6-1-15.xml"
+
+    try:
+        with patch(
+            "backend.workers.report_job.get_article_urls", return_value=([], [failed_loc])
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        articles = db_session.query(Article).filter_by(job_id=job.job_id).all()
+        assert len(articles) == 1
+        assert articles[0].status == "error"
+        assert articles[0].url == failed_loc
+        assert articles[0].title is None
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_calls_fetch_article_dispatch_with_url_and_parsing_rules(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    parsing_rules = {"engine": "crawl4ai"}
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules=parsing_rules)
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    candidates = [{"url": "https://example.test/article-1", "lastmod": date(2026, 6, 1)}]
+    captured = {}
+
+    def fake_dispatch(url, rules, **kwargs):
+        captured["called_with"] = (url, rules)
+        return None
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        assert captured["called_with"] == ("https://example.test/article-1", parsing_rules)
     finally:
         db_session.query(Article).filter_by(job_id=job.job_id).delete()
         db_session.delete(job)

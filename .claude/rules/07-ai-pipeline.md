@@ -93,6 +93,7 @@ async def analyze_article(title: str, content: str) -> dict:
 **Quy tắc xử lý output:**
 - `confidence < 0.6` → flag `needs_review=true`, vẫn lưu và đưa vào báo cáo (không xóa)
 - AI trả về JSON không hợp lệ → parse với try/except, retry 1 lần, nếu vẫn lỗi thì skip bài đó
+- Nội dung dài hơn `AI_MAX_CONTENT_LENGTH` → cắt tại ranh giới câu gần nhất (`.`, `!`, `?`, xuống dòng), không cắt giữa câu/từ (`_truncate_at_sentence_boundary` trong `backend/ai/ollama_client.py`)
 
 ---
 
@@ -103,6 +104,8 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=qwen3:8b
 
 AI_CONFIDENCE_THRESHOLD=0.6
-AI_MAX_CONTENT_LENGTH=2000
-AI_TIMEOUT_SECONDS=120
+AI_MAX_CONTENT_LENGTH=5000
+AI_TIMEOUT_SECONDS=360
 ```
+
+> `AI_MAX_CONTENT_LENGTH=5000` và `AI_TIMEOUT_SECONDS=360` là giải pháp tạm thời (2026-06-26) — xem "Quyết định quan trọng & lý do" ở CLAUDE.md. Cân nhắc nâng/hạ lại theo tần suất timeout thật gặp phải khi có thêm dữ liệu (Slice 3).

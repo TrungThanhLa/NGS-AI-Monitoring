@@ -17,15 +17,26 @@ def _parse_json_response(raw: str) -> dict:
     return json.loads(match.group(0))
 
 
+def _truncate_at_sentence_boundary(content: str, max_length: int) -> str:
+    if len(content) <= max_length:
+        return content
+    window = content[:max_length]
+    # Lùi về dấu kết câu gần nhất trong window để không cắt giữa câu/từ
+    last_boundary = max(window.rfind(ch) for ch in ".!?\n")
+    if last_boundary == -1:
+        return window
+    return window[: last_boundary + 1]
+
+
 def analyze_article(title: str, content: str, client: httpx.Client | None = None) -> dict:
     owns_client = client is None
-    client = client or httpx.Client(timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "120")))
+    client = client or httpx.Client(timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "360")))
 
-    max_content_length = int(os.environ.get("AI_MAX_CONTENT_LENGTH", "2000"))
+    max_content_length = int(os.environ.get("AI_MAX_CONTENT_LENGTH", "5000"))
     confidence_threshold = float(os.environ.get("AI_CONFIDENCE_THRESHOLD", "0.6"))
     prompt = CLASSIFICATION_PROMPT.format(
         title=title,
-        content_snippet=content[:max_content_length],
+        content_snippet=_truncate_at_sentence_boundary(content, max_content_length),
         topic_list="\n".join(f"- {t}" for t in TOPIC_GROUPS),
     )
 

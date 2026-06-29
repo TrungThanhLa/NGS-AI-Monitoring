@@ -52,7 +52,7 @@ def test_returns_only_urls_with_lastmod_inside_date_range_and_skips_irrelevant_s
     handler, requested = make_handler()
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    result = get_article_urls(
+    result, failed_locs = get_article_urls(
         FakeSource(),
         date_from=date(2026, 6, 22),
         date_to=date(2026, 6, 24),
@@ -64,6 +64,7 @@ def test_returns_only_urls_with_lastmod_inside_date_range_and_skips_irrelevant_s
     assert urls == ["https://vtv.vn/bai-viet-trong-khoang-ngay-100260623123456789.htm"]
     # sub-sitemap 11-15 không giao với khoảng 22-24 -> không được fetch
     assert "https://vtv.vn/sitemaps/sitemaps-2026-6-11-15.xml" not in requested
+    assert failed_locs == []
 
 
 def test_skips_sub_sitemap_that_keeps_failing_after_retries_without_raising():
@@ -79,7 +80,7 @@ def test_skips_sub_sitemap_that_keeps_failing_after_retries_without_raising():
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
-    result = get_article_urls(
+    result, failed_locs = get_article_urls(
         FakeSource(),
         date_from=date(2026, 6, 22),
         date_to=date(2026, 6, 24),
@@ -90,3 +91,5 @@ def test_skips_sub_sitemap_that_keeps_failing_after_retries_without_raising():
 
     assert result == []
     assert attempts["count"] == 3
+    # sub-sitemap lỗi hết retry phải được báo lại cho caller để hiện lỗi trên UI
+    assert failed_locs == ["https://vtv.vn/sitemaps/sitemaps-2026-6-21-25.xml"]

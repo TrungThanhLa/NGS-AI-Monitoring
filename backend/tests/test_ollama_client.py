@@ -1,3 +1,5 @@
+import json
+
 import httpx
 import pytest
 
@@ -77,3 +79,20 @@ def test_returns_analysis_duration_seconds():
     result = analyze_article("Tiêu đề", "Nội dung bài viết", client=client)
 
     assert result["analysis_duration_seconds"] > 0
+
+
+def test_truncates_content_at_sentence_boundary_not_mid_word(monkeypatch):
+    monkeypatch.setenv("AI_MAX_CONTENT_LENGTH", "20")
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["prompt"] = json.loads(request.content)["prompt"]
+        return httpx.Response(200, json={"response": VALID_JSON})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+
+    content = "Câu đầu tiên ngắn. Câu thứ hai dài hơn nhiều và sẽ bị cắt bỏ."
+    analyze_article("Tiêu đề", content, client=client)
+
+    assert "Câu đầu tiên ngắn." in captured["prompt"]
+    assert "Câu thứ hai" not in captured["prompt"]

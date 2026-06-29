@@ -46,7 +46,7 @@ def get_article_urls(
     client: httpx.Client | None = None,
     delay_seconds: float | None = None,
     max_retries: int | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[str]]:
     owns_client = client is None
     client = client or httpx.Client(timeout=int(os.environ.get("CRAWLER_TIMEOUT_SECONDS", "30")))
     if delay_seconds is None:
@@ -66,10 +66,12 @@ def get_article_urls(
                 sub_sitemap_locs.append(loc)
 
         results = []
+        failed_locs = []
         for loc in sub_sitemap_locs:
             time.sleep(delay_seconds)
             sub_resp = _fetch_with_retry(client, loc, max_retries)
             if sub_resp is None:
+                failed_locs.append(loc)
                 continue
             sub_soup = BeautifulSoup(sub_resp.text, "xml")
             for url_tag in sub_soup.find_all("url"):
@@ -78,7 +80,7 @@ def get_article_urls(
                 lastmod = _parse_lastmod(lastmod_tag.get_text(strip=True)) if lastmod_tag else None
                 if lastmod and date_from <= lastmod <= date_to:
                     results.append({"url": article_url, "lastmod": lastmod})
-        return results
+        return results, failed_locs
     finally:
         if owns_client:
             client.close()

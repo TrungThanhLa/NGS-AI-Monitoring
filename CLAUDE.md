@@ -76,14 +76,15 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 - Xác định scope MVP, tech stack, business flow 8 bước, DB schema 5 bảng, API contract, rule crawler/AI/DOCX/FE (rules 01–09)
 - Pilot test thật ngoài code: khảo sát 40 kênh, crawl thử được 11/40 (`Bao_cao_Du_lieu_Thuc_22-06-2026.docx`)
 - **Slice 0 + Slice 1** (walking skeleton VTV) và **phần mở rộng** (bảng crawl trực tiếp/benchmark, Cancel, giới hạn test, khôi phục F5, fix 2 bug error-handling) — **đã merge `main`**, verify thật với dữ liệu VTV (104 bài crawl thật, AI phân tích thật qua `qwen3:8b`, DOCX/JSON hợp lệ), 32 unit test pass. Chi tiết từng phần xem Roadmap Slice 1 và bảng "Quyết định quan trọng" dưới
+- **Tích hợp Crawl4AI làm engine fetch thay thế** (chuẩn bị cho Slice 2, chưa phải checklist item của Slice 2) — thêm `backend/crawler/crawl4ai_client.py` (`fetch_article_crawl4ai` + `fetch_article_dispatch`), bật theo từng nguồn qua key `parsing_rules.engine` (không thêm cột/migration), giữ nguyên 100% hành vi cũ cho nguồn không khai `engine` (VTV). Verify thật trên VTV + VOV, 48 unit test pass (12 test riêng cho crawl4ai). Đã qua code review (8 góc nhìn) trước khi commit, phát hiện & fix 1 bug thật (exception từ crawl4ai làm fail nguyên job — xem bảng "Quyết định quan trọng" dưới)
 
 ### Trạng thái hiện tại
 - Slice 0 + Slice 1 (gồm phần mở rộng): hoàn thành, đã merge `main`
+- Crawl4AI engine: code xong, verify thật trên VTV/VOV qua lời gọi hàm trực tiếp — **chưa có nguồn nào trong DB thật cấu hình dùng** (VTV vẫn mặc định httpx; VOV chỉ là test, chưa thêm vào bảng `sources`)
 - Slice 2–6: chưa bắt đầu
 
 ### Bước tiếp theo
-1. Xử lý vấn đề tồn đọng ở "Vấn đề cần làm rõ" dưới (lỗi sub-sitemap vô hình trên UI, `AI_MAX_CONTENT_LENGTH` cắt cứng)
-2. Bắt đầu Slice 2: nhiều nguồn + listing-page fallback — chi tiết ở Roadmap dưới
+1. Bắt đầu Slice 2: nhiều nguồn + listing-page fallback — chi tiết ở Roadmap dưới (Crawl4AI engine có thể dùng cho nguồn mới không có CSS selector sẵn, xem [06 · Crawler Strategy](.claude/rules/06-crawler-strategy.md))
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
@@ -99,11 +100,19 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 | Khôi phục job sau F5 dùng `sessionStorage`, không dùng `localStorage` | Chỉ cần sống qua reload trong cùng tab, tự dọn khi đóng tab — tránh "job ma" lưu nhiều ngày |
 | AI timeout (>120s) chỉ skip 1 bài, không fail cả job | Bug thật: code cũ chỉ bắt `ValueError`, không bắt `httpx.HTTPError` (timeout) → fail cả job, mất báo cáo của các bài đã phân tích xong |
 | Crawler lỗi (hết retry) vẫn insert row `Article` với `status="error"` | Trước đây bỏ qua âm thầm, không log/lưu gì — giờ hiện được trên bảng crawl trực tiếp ở FE |
+| Lỗi sub-sitemap (hết retry) cũng insert row `Article` với `status="error"` (`url` = URL sub-sitemap lỗi, `title=null`) | Tái dùng đúng cơ chế hiển thị lỗi đã có cho article-level crawl error — không cần migration/đổi FE. Hash `url_hash` theo `job_id + url` (không phải `SHA256(url)` như bài viết) để tránh đụng `UNIQUE` constraint khi job khác sau này crawl lại đúng nguồn gặp lại sub-sitemap lỗi (2026-06-26) |
+| `AI_MAX_CONTENT_LENGTH` 2000→5000, `AI_TIMEOUT_SECONDS` 120→360 (tạm thời) + cắt nội dung tại ranh giới câu thay vì cắt cứng giữa câu/từ | Giảm rủi ro mất ngữ nghĩa bài dài và giảm tần suất AI timeout (đã từng xảy ra thật ở mức 2000/120). Đây là giải pháp tạm — tăng theo khoảng người dùng đề xuất (5-6 phút, chọn mức cao 360s), sẽ nâng/hạ lại theo tần suất lỗi thật gặp phải khi có thêm dữ liệu (Slice 3) (2026-06-26) |
+| Crawl4AI bật theo nguồn qua key `parsing_rules.engine == "crawl4ai"` (JSONB có sẵn), không thêm cột `crawler_engine` riêng | Tái dùng đúng thiết kế linh hoạt đã chốt sẵn (`sources.parsing_rules` JSONB) — không cần migration, ít thay đổi nhất; nguồn không khai `engine` (VTV) chạy y nguyên httpx cũ, không regression (2026-06-29) |
+| Logic rẽ nhánh httpx/Crawl4AI viết dạng hàm thuần `fetch_article_dispatch()` trong `crawl4ai_client.py`, không dùng class `ArticleFetcher` | Chỉ là dispatch theo 1 flag, không có state cần giữ giữa các lần fetch — đúng style function-based đang dùng toàn bộ `crawler/`; tránh đặt câu hỏi thừa về lifecycle instance khi không cần (2026-06-29) |
+| Hạ `lxml` từ `6.1.1` xuống `~5.3` trong `requirements.txt` | Xung đột dependency thật khi build Docker: `crawl4ai==0.9.0` yêu cầu `lxml~=5.3`, không tương thích `6.1.1`. Đã dry-run xác nhận resolve sạch với `beautifulsoup4`/`python-docx` hiện có trước khi đổi (2026-06-29) |
+| Thêm bước hậu xử lý regex-trim cắt content Crawl4AI tại marker `"Tin liên quan"`/`"Bình luận"` | Verify thật cho thấy `fit_markdown` mặc định của Crawl4AI không sạch — dính thêm ~66% rác (VTV: 2887→1737 ký tự) tới ~72% rác (VOV: 13909→8097 ký tự) là box "bài liên quan"/bình luận, làm dài context không cần thiết khi feed AI. 2 marker này là convention phổ biến báo điện tử VN (verify trên 2 site khác nhau), không phải đặc thù 1 site (2026-06-29) |
+| `celery-worker`/`flower` phải rebuild riêng khi đổi `requirements.txt`, không chỉ `backend` | 3 service dùng chung `backend/Dockerfile` nhưng Compose build 3 image riêng — quên rebuild `celery-worker`/`flower` từng gây `ModuleNotFoundError: crawl4ai` lúc worker start thật (2026-06-29) |
+| Xóa `ping_task` khỏi `celery_app.py` | Dead code sót lại từ verify Celery ở Slice 0 (xem Slice 0 dưới), không còn được gọi ở đâu — đã xác nhận không có tham chiếu nào trước khi xóa, test + container `celery-worker` vẫn chạy `healthy` sau khi xóa (2026-06-29) |
+| Chấp nhận phần rác còn dư khi crawl VOV qua Crawl4AI (không thêm `excluded_selector`) | Phần dư (~600-700 ký tự, box "bài liên quan" nhúng trong content) không lớn, CSS selector thủ công cũng gặp đúng vấn đề này (không phải nhược điểm riêng của Crawl4AI) — chưa đáng đánh đổi thêm độ phức tạp ở giai đoạn này; có thể quay lại nếu Slice 2 phát hiện vấn đề rõ hơn (2026-06-29) |
+| Bọc `try/except Exception` quanh `fetch_article_dispatch()` trong `_crawl_sources()` | Bug thật phát hiện qua code review trước khi commit: lỗi từ `fetch_article_crawl4ai()` (network exception trong `asyncio.run`, `ValueError` từ `datetime.fromisoformat` nếu meta tag ngày không chuẩn ISO-8601) bay thẳng lên `run_report_job`, làm fail nguyên cả job thay vì chỉ 1 bài — sai đúng nguyên tắc đã ghi ở `10-error-handling.md`. Chưa kích hoạt trong production (chưa nguồn nào dùng `engine=crawl4ai` thật) nhưng sửa trước khi nguồn đầu tiên dùng tới (2026-06-29) |
 
 ### Vấn đề cần làm rõ (chưa chốt)
 - **Số nguồn ước tính ở Slice 2** ghi "8–10 nguồn thực tế" nhưng theo `content_survey.docx` thực tế là ~11–12 nguồn, khớp pilot test 11/40 — chưa sửa số trong roadmap
-- **Lỗi sub-sitemap (khác lỗi article) vẫn vô hình trên UI** — hết retry chỉ log server, không có URL cụ thể để tạo row `status="error"` — chưa quyết định có cần làm thêm hay log server là đủ
-- **`AI_MAX_CONTENT_LENGTH=2000` cắt cứng nội dung gửi AI** — bài dài hơn 2000 ký tự mất phần cuối — chưa quyết định giữ nguyên, tóm tắt trước khi cắt, hay tăng giới hạn
 
 ## Roadmap — Vertical Slices
 
@@ -129,7 +138,7 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 
 ### Slice 2 — Nhiều nguồn + listing-page fallback
 - [ ] Listing page crawler (fallback khi nguồn không có sitemap)
-- [ ] Config & test 8–10 nguồn thực tế (VTV, VOV, QĐND, BCA...)
+- [ ] Config & test 8–10 nguồn thực tế (VTV, VOV, QĐND, BCA...) — có thể dùng engine Crawl4AI (`parsing_rules.engine = "crawl4ai"`) cho nguồn chưa có CSS selector, xem [06 · Crawler Strategy](.claude/rules/06-crawler-strategy.md)
 - [ ] FE: sidebar chọn nhiều nguồn (search, group theo nhóm kênh), tag nguồn đã chọn, summary card ước tính số bài/thời gian, preset ngày (7/30/90/150), warning khi ≥5 nguồn & ≥60 ngày
 - **Verify:** crawl thành công ≥8 nguồn thực tế (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại)
 
@@ -148,7 +157,7 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 ### Slice 5 — UX & vận hành hoàn chỉnh
 - [x] Job status polling + progress UI chi tiết (`crawled/analyzed/total_estimated`) — đã làm ở Slice 1, mở rộng thêm bảng crawl trực tiếp + Cancel (xem Slice 1)
 - [ ] Trang lịch sử báo cáo (`GET /api/reports/history`)
-- [ ] Error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) (retry, timeout, JS-render fallback Playwright) — **đã làm trước 1 phần:** AI timeout chỉ skip 1 bài (không fail cả job), crawler lỗi hiện `status="error"` trên UI; **còn thiếu:** lỗi sub-sitemap vẫn vô hình trên UI, JS-render fallback Playwright chưa làm
+- [ ] Error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) (retry, timeout, JS-render fallback Playwright) — **đã làm trước 1 phần:** AI timeout chỉ skip 1 bài (không fail cả job), crawler lỗi (article + sub-sitemap) hiện `status="error"` trên UI; **còn thiếu:** JS-render fallback Playwright chưa làm
 - **Verify:** giả lập timeout/JSON lỗi/nguồn bị block → job xử lý đúng theo bảng error-handling, không crash toàn job
 
 ### Slice 6 — Admin UI quản lý nguồn

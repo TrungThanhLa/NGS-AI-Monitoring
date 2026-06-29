@@ -6,7 +6,8 @@ from datetime import datetime
 import httpx
 
 from backend.ai.ollama_client import analyze_article
-from backend.crawler.article import compute_url_hash, fetch_article
+from backend.crawler.article import compute_url_hash
+from backend.crawler.crawl4ai_client import fetch_article_dispatch
 from backend.crawler.sitemap import get_article_urls
 from backend.db import SessionLocal
 from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
@@ -41,10 +42,24 @@ def _crawl_sources(db, job: Job) -> None:
 
         source = db.get(Source, source_id)
         try:
-            candidates = get_article_urls(source, job.date_from, job.date_to)
+            candidates, failed_sub_sitemaps = get_article_urls(source, job.date_from, job.date_to)
         except Exception:
             logger.exception("Lỗi lấy sitemap cho nguồn %s", source.domain)
             continue
+
+        for loc in failed_sub_sitemaps:
+            # Hash theo job_id+url (không phải SHA256(url) như bài viết) vì url_hash UNIQUE
+            # toàn cục — cùng 1 sub-sitemap có thể lỗi lại ở job khác, nguồn khác lần crawl
+            db.add(
+                Article(
+                    job_id=job.job_id,
+                    source_id=source.source_id,
+                    url=loc,
+                    url_hash=compute_url_hash(f"{job.job_id}:{loc}"),
+                    status="error",
+                )
+            )
+            db.commit()
 
         for candidate in candidates:
             if max_articles is not None and crawled_count() >= max_articles:
@@ -54,7 +69,11 @@ def _crawl_sources(db, job: Job) -> None:
             if db.query(Article).filter_by(url_hash=url_hash).first() is not None:
                 continue
 
-            parsed = fetch_article(candidate["url"], source.parsing_rules)
+            try:
+                parsed = fetch_article_dispatch(candidate["url"], source.parsing_rules)
+            except Exception:
+                logger.exception("Crawl lỗi (exception), đánh dấu error: %s", candidate["url"])
+                parsed = None
             time.sleep(delay_seconds)
             if parsed is None:
                 logger.warning("Crawl lỗi (hết retry hoặc không parse được), đánh dấu error: %s", candidate["url"])

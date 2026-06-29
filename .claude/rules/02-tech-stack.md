@@ -11,6 +11,7 @@ alwaysApply: true
 | Backend API | Python + FastAPI | REST API, async |
 | Job Queue | Celery + Redis | Background jobs, retry tự động |
 | Crawler | httpx + BeautifulSoup + Playwright | Sitemap XML primary, listing page fallback |
+| Crawler (engine tùy chọn) | Crawl4AI (HTTP-only mode) | Bật theo nguồn qua `parsing_rules.engine = "crawl4ai"` — tự nhận diện content, không cần CSS selector tay. Mặc định vẫn httpx (2026-06-29) |
 | AI Runtime | Ollama | Local inference, REST API |
 | AI Model | `qwen3:8b` | Tiếng Việt tốt, chạy CPU-only |
 | NLP phụ trợ | underthesea | Keyword/NER extraction nhanh |
@@ -54,7 +55,8 @@ ngs-monitor/
 │   ├── crawler/
 │   │   ├── sitemap.py         # Sitemap XML parser
 │   │   ├── listing.py         # Listing page fallback
-│   │   └── article.py         # Article content parser
+│   │   ├── article.py         # Article content parser (httpx + CSS selector, mặc định)
+│   │   └── crawl4ai_client.py # Engine thay thế (engine="crawl4ai") + fetch_article_dispatch()
 │   ├── ai/
 │   │   ├── ollama_client.py   # Gọi Ollama API
 │   │   ├── prompts/           # Prompt versioned theo file: v1.py, v2.py...
