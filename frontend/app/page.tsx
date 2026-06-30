@@ -54,8 +54,9 @@ export default function Home() {
 
   useEffect(() => {
     fetch(`${API_BASE}/api/sources`)
-      .then((res) => res.json())
-      .then((data) => setSources(data.sources));
+      .then((res) => (res.ok ? res.json() : { sources: [] }))
+      .then((data) => setSources(data.sources ?? []))
+      .catch(() => setSources([]));
   }, []);
 
   function toggleSource(sourceId: string) {
