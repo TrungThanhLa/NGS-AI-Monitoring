@@ -8,6 +8,7 @@ import httpx
 from backend.ai.ollama_client import analyze_article
 from backend.crawler.article import compute_url_hash
 from backend.crawler.crawl4ai_client import fetch_article_dispatch
+from backend.crawler.listing import get_listing_urls
 from backend.crawler.sitemap import get_article_urls
 from backend.db import SessionLocal
 from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
@@ -29,6 +30,14 @@ def _parse_max_articles(raw: str | None) -> int | None:
     return value if value > 0 else None
 
 
+def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
+    # Sitemap luôn được ưu tiên khi nguồn có khai sitemap_url; chỉ dùng listing-page khi
+    # nguồn không có sitemap (VD tingia.gov.vn) — đúng thứ tự ưu tiên ở 06-crawler-strategy.md
+    if source.listing_url and not source.sitemap_url:
+        return get_listing_urls(source, date_from, date_to)
+    return get_article_urls(source, date_from, date_to)
+
+
 def _crawl_sources(db, job: Job) -> None:
     delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     max_articles = _parse_max_articles(os.environ.get("MAX_ARTICLES_PER_JOB"))
@@ -42,14 +51,14 @@ def _crawl_sources(db, job: Job) -> None:
 
         source = db.get(Source, source_id)
         try:
-            candidates, failed_sub_sitemaps = get_article_urls(source, job.date_from, job.date_to)
+            candidates, failed_locs = _get_candidates(source, job.date_from, job.date_to)
         except Exception:
-            logger.exception("Lỗi lấy sitemap cho nguồn %s", source.domain)
+            logger.exception("Lỗi lấy danh sách bài viết cho nguồn %s", source.domain)
             continue
 
-        for loc in failed_sub_sitemaps:
+        for loc in failed_locs:
             # Hash theo job_id+url (không phải SHA256(url) như bài viết) vì url_hash UNIQUE
-            # toàn cục — cùng 1 sub-sitemap có thể lỗi lại ở job khác, nguồn khác lần crawl
+            # toàn cục — cùng 1 sub-sitemap/listing-page có thể lỗi lại ở job khác, nguồn khác
             db.add(
                 Article(
                     job_id=job.job_id,
@@ -87,6 +96,15 @@ def _crawl_sources(db, job: Job) -> None:
                     )
                 )
                 db.commit()
+                continue
+
+            published_at = parsed.get("published_at")
+            if published_at and not (job.date_from <= published_at.date() <= job.date_to):
+                # Sitemap phẳng/listing-page không lọc được chính xác theo ngày trước khi fetch
+                # (VD bocongan.gov.vn ghi <lastmod> giống nhau cho mọi URL, không phải ngày đăng
+                # thật) — lọc lại ở đây bằng ngày đăng thật lấy từ chính bài viết. Không phải
+                # lỗi nên không insert status=error, chỉ bỏ qua âm thầm.
+                logger.info("Bỏ qua bài ngoài khoảng ngày yêu cầu (%s): %s", published_at.date(), candidate["url"])
                 continue
 
             db.add(
