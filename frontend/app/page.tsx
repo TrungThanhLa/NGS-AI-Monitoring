@@ -1,13 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import SourceSidebar, { SourceItem } from "@/components/SourceSidebar";
+import SummaryCard from "@/components/SummaryCard";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
-// UUID cố định seed sẵn cho nguồn VTV ở migration 0002_seed_vtv_source.py
-const VTV_SOURCE_ID = "00000000-0000-0000-0000-000000000001";
 // sessionStorage (không phải localStorage) — chỉ cần sống qua F5 trong cùng tab,
 // tự dọn khi đóng tab, tránh "job ma" lưu lại nhiều ngày
 const JOB_ID_STORAGE_KEY = "ngs_monitor_job_id";
+
+const DATE_PRESETS = [
+  { label: "7 ngày", days: 7 },
+  { label: "30 ngày", days: 30 },
+  { label: "90 ngày", days: 90 },
+  { label: "150 ngày", days: 150 },
+];
 
 function todayMinus(days: number): string {
   const d = new Date();
@@ -42,6 +49,28 @@ export default function Home() {
   const [status, setStatus] = useState<JobStatus | null>(null);
   const [articles, setArticles] = useState<CrawledArticle[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [sources, setSources] = useState<SourceItem[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/api/sources`)
+      .then((res) => res.json())
+      .then((data) => setSources(data.sources));
+  }, []);
+
+  function toggleSource(sourceId: string) {
+    setSelectedSourceIds((prev) =>
+      prev.includes(sourceId) ? prev.filter((id) => id !== sourceId) : [...prev, sourceId]
+    );
+  }
+
+  function applyPreset(days: number) {
+    setDateFrom(todayMinus(days));
+    setDateTo(todayMinus(0));
+  }
+
+  const parsedDayCount = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000);
+  const dayCount = Number.isFinite(parsedDayCount) ? Math.max(0, parsedDayCount) : 0;
 
   function updateStatus(data: JobStatus) {
     setStatus(data);
@@ -90,7 +119,7 @@ export default function Home() {
     const res = await fetch(`${API_BASE}/api/reports/create`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_ids: [VTV_SOURCE_ID], date_from: dateFrom, date_to: dateTo }),
+      body: JSON.stringify({ source_ids: selectedSourceIds, date_from: dateFrom, date_to: dateTo }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -113,26 +142,39 @@ export default function Home() {
     }
   }
 
-  const disabled = !dateFrom || !dateTo || dateFrom >= dateTo;
+  const disabled = !dateFrom || !dateTo || dateFrom >= dateTo || selectedSourceIds.length === 0;
   const canCancel = status?.status === "pending" || status?.status === "running";
 
   return (
     <main className="p-8 max-w-3xl">
       <h1 className="text-2xl font-bold mb-4">NGS Monitor</h1>
 
-      <div className="mb-4">
-        <label className="block font-medium">Nguồn dữ liệu</label>
-        <p>VTV News</p>
-      </div>
+      <div className="mb-4 grid grid-cols-2 gap-4">
+        <SourceSidebar sources={sources} selectedIds={selectedSourceIds} onToggle={toggleSource} />
 
-      <div className="mb-4 flex gap-4">
         <div>
-          <label className="block font-medium">Từ ngày</label>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        </div>
-        <div>
-          <label className="block font-medium">Đến ngày</label>
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+          <div className="flex gap-2 mb-2">
+            {DATE_PRESETS.map((preset) => (
+              <button
+                key={preset.days}
+                className="border rounded px-2 py-1 text-sm"
+                onClick={() => applyPreset(preset.days)}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-4 mb-3">
+            <div>
+              <label className="block font-medium">Từ ngày</label>
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+            </div>
+            <div>
+              <label className="block font-medium">Đến ngày</label>
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+            </div>
+          </div>
+          <SummaryCard sourceCount={selectedSourceIds.length} dayCount={dayCount} />
         </div>
       </div>
 
