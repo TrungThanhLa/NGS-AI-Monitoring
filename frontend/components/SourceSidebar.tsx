@@ -42,6 +42,7 @@ export default function SourceSidebar({ sources, selectedIds, onToggle }: Props)
       <input
         type="text"
         placeholder="🔍 Tìm nguồn..."
+        aria-label="Tìm nguồn"
         className="w-full border rounded px-2 py-1 mb-3"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
