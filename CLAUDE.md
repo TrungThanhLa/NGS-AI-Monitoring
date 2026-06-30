@@ -80,11 +80,12 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 
 ### Trạng thái hiện tại
 - Slice 0 + Slice 1 (gồm phần mở rộng): hoàn thành, đã merge `main`
-- Crawl4AI engine: code xong, verify thật trên VTV/VOV qua lời gọi hàm trực tiếp — **chưa có nguồn nào trong DB thật cấu hình dùng** (VTV vẫn mặc định httpx; VOV chỉ là test, chưa thêm vào bảng `sources`)
-- Slice 2–6: chưa bắt đầu
+- Crawl4AI engine: code xong, verify thật trên VTV/VOV qua lời gọi hàm trực tiếp — nay đã dùng thật cho 5/6 nguồn cấu hình ở Slice 2 (xem dưới)
+- Slice 2: code xong (sitemap tổng quát hóa, listing-page crawler, 6 nguồn seed qua migration, FE sidebar/summary/preset), verify ở mức unit test + migration thật — **chưa chạy job thật end-to-end với nguồn mới** (còn chờ thực hiện, xem Roadmap dưới)
+- Slice 3–6: chưa bắt đầu
 
 ### Bước tiếp theo
-1. Bắt đầu Slice 2: nhiều nguồn + listing-page fallback — chi tiết ở Roadmap dưới (Crawl4AI engine có thể dùng cho nguồn mới không có CSS selector sẵn, xem [06 · Crawler Strategy](.claude/rules/06-crawler-strategy.md))
+1. Chạy job thật end-to-end với ≥1 nguồn mới của Slice 2 để verify thật (sitemap tổng quát hóa, listing-page, lọc ngày đăng thật sau fetch) — chi tiết ở Roadmap dưới
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
@@ -110,9 +111,16 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 | Xóa `ping_task` khỏi `celery_app.py` | Dead code sót lại từ verify Celery ở Slice 0 (xem Slice 0 dưới), không còn được gọi ở đâu — đã xác nhận không có tham chiếu nào trước khi xóa, test + container `celery-worker` vẫn chạy `healthy` sau khi xóa (2026-06-29) |
 | Chấp nhận phần rác còn dư khi crawl VOV qua Crawl4AI (không thêm `excluded_selector`) | Phần dư (~600-700 ký tự, box "bài liên quan" nhúng trong content) không lớn, CSS selector thủ công cũng gặp đúng vấn đề này (không phải nhược điểm riêng của Crawl4AI) — chưa đáng đánh đổi thêm độ phức tạp ở giai đoạn này; có thể quay lại nếu Slice 2 phát hiện vấn đề rõ hơn (2026-06-29) |
 | Bọc `try/except Exception` quanh `fetch_article_dispatch()` trong `_crawl_sources()` | Bug thật phát hiện qua code review trước khi commit: lỗi từ `fetch_article_crawl4ai()` (network exception trong `asyncio.run`, `ValueError` từ `datetime.fromisoformat` nếu meta tag ngày không chuẩn ISO-8601) bay thẳng lên `run_report_job`, làm fail nguyên cả job thay vì chỉ 1 bài — sai đúng nguyên tắc đã ghi ở `10-error-handling.md`. Chưa kích hoạt trong production (chưa nguồn nào dùng `engine=crawl4ai` thật) nhưng sửa trước khi nguồn đầu tiên dùng tới (2026-06-29) |
+| Tổng quát hóa `sitemap.py` để nhận sitemap phẳng + nhiều pattern tên sub-sitemap (thay vì chỉ đúng pattern VTV) | Verify thật cho thấy VOV/VietnamPlus/CAND dùng pattern khác VTV (`news-YYYY-M.xml`/`/YYYY/M/...`), bocongan.gov.vn dùng sitemap phẳng không có index — code cũ sẽ trả về 0 bài cho cả 4 nguồn này nếu không sửa (2026-06-29) |
+| Lọc lại theo `published_at` thật sau khi fetch bài (không chỉ tin sitemap `<lastmod>`) | bocongan.gov.vn ghi `<lastmod>` giống nhau y hệt cho toàn bộ 500 URL trong sitemap (timestamp build lại sitemap, không phải ngày đăng thật, đã verify thật bằng curl) — lọc theo lastmod sẽ làm rớt nhầm toàn bộ bài hợp lệ hoặc giữ nhầm toàn bộ bài không hợp lệ tùy khoảng ngày yêu cầu (2026-06-29) |
+| Listing-page crawler chỉ hỗ trợ 1 trang, không phân trang | Nguồn duy nhất cần đến (tingia.gov.vn) không có phân trang thật trên trang danh sách (đã verify) — không xây cơ chế phân trang khi chưa có nguồn thật nào cần (YAGNI), mở rộng khi Slice sau có nguồn cần thật (2026-06-29) |
+| Cả 5 nguồn mới (VOV, VietnamPlus, CAND, BoCongAn, TinGia) dùng engine Crawl4AI, không viết CSS selector tay | Tránh 6x công reverse-engineer CSS selector cho 6 template HTML khác nhau; Crawl4AI đã verify hoạt động thật trên VTV+VOV trước đó, đúng định hướng đã ghi sẵn trong roadmap Slice 2 (2026-06-29) |
+| Tạm loại qdnd.vn khỏi Slice 2 | `curl`/WebFetch tới `sitemap.xml` và cả trang chủ qdnd.vn đều bị redirect-loop vô hạn (302) từ network môi trường test — chưa rõ do chặn bot hay do IP/network môi trường test, cần verify lại từ server production trước khi thêm (2026-06-29) |
 
 ### Vấn đề cần làm rõ (chưa chốt)
 - **Số nguồn ước tính ở Slice 2** ghi "8–10 nguồn thực tế" nhưng theo `content_survey.docx` thực tế là ~11–12 nguồn, khớp pilot test 11/40 — chưa sửa số trong roadmap
+- **Số nguồn Slice 2 chỉ đạt 6 (không phải 8–10)** — đã xác nhận 6 nguồn crawl được thật (VTV+VOV+VietnamPlus+CAND+BoCongAn+TinGia); qdnd.vn bị loại do lỗi redirect-loop chưa rõ nguyên nhân (xem bảng quyết định); chinhphu.vn/mod.gov.vn/bvhttdl.gov.vn không có bài chuyên tin giả theo khảo sát thật — người dùng xác nhận 6 nguồn là đủ cho slice này, không ép đủ số
+- **Hằng số `ESTIMATED_SECONDS_PER_ARTICLE = 90` ở `SummaryCard.tsx`** là ước lượng thô, chưa có benchmark thật trên nhiều nguồn — cần điều chỉnh lại khi Slice 3 có dữ liệu benchmark thật trên ≥50 bài
 
 ## Roadmap — Vertical Slices
 
@@ -137,10 +145,10 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 - **Mở rộng thêm sau khi verify** (đã merge `main` cùng đợt): bảng crawl trực tiếp + benchmark thời gian, hủy job (Cancel), giới hạn `MAX_ARTICLES_PER_JOB`, khôi phục job sau F5, fix AI timeout/crawler error-handling — xem "Quyết định quan trọng & lý do" ở trên
 
 ### Slice 2 — Nhiều nguồn + listing-page fallback
-- [ ] Listing page crawler (fallback khi nguồn không có sitemap)
-- [ ] Config & test 8–10 nguồn thực tế (VTV, VOV, QĐND, BCA...) — có thể dùng engine Crawl4AI (`parsing_rules.engine = "crawl4ai"`) cho nguồn chưa có CSS selector, xem [06 · Crawler Strategy](.claude/rules/06-crawler-strategy.md)
-- [ ] FE: sidebar chọn nhiều nguồn (search, group theo nhóm kênh), tag nguồn đã chọn, summary card ước tính số bài/thời gian, preset ngày (7/30/90/150), warning khi ≥5 nguồn & ≥60 ngày
-- **Verify:** crawl thành công ≥8 nguồn thực tế (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại)
+- [x] Listing page crawler (fallback khi nguồn không có sitemap) — `backend/crawler/listing.py`, phạm vi 1 trang không phân trang (YAGNI, chỉ tingia.gov.vn cần đến hiện tại)
+- [x] Config & test 6 nguồn thực tế (VTV, VOV, VietnamPlus, CAND, BoCongAn, TinGia — ít hơn ước tính gốc 8–10, xem "Vấn đề cần làm rõ" dưới) — toàn bộ 5 nguồn mới dùng engine Crawl4AI (`parsing_rules.engine = "crawl4ai"`), không viết CSS selector tay
+- [x] FE: sidebar chọn nhiều nguồn (search, group theo nhóm kênh), tag nguồn đã chọn, summary card ước tính số bài/thời gian, preset ngày (7/30/90/150), warning khi ≥5 nguồn & ≥60 ngày
+- **Verify:** crawl thành công ≥8 nguồn thực tế (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại) — **đã verify ở mức unit test + migration thật** (sitemap/listing parser, dispatch chiến lược, lọc ngày đăng thật sau fetch, seed 6 nguồn qua `alembic upgrade head`); **chưa chạy job thật end-to-end với nguồn mới** — xem Task 10 ở `docs/superpowers/plans/2026-06-29-slice2-multi-source.md` (còn chờ thực hiện). Dedup giữ nguyên cơ chế cũ (SHA256(url))
 
 ### Slice 3 — AI pipeline đầy đủ
 - [ ] Prompt phân loại đầy đủ 8 nhóm chủ đề + keyword + sentiment + `emotion` (6 lớp)

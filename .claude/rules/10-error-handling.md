@@ -11,6 +11,7 @@ alwaysApply: true
 | Sub-sitemap lỗi (1 khối ngày của sitemap VTV không tải được) | Retry 3 lần; hết retry → log cảnh báo phía server **và** insert row `Article` với `status="error"` (`url` = URL sub-sitemap lỗi, `title=null`, hash theo `job_id + url` thay vì `SHA256(url)` để tránh đụng `UNIQUE` constraint khi job khác sau này gặp lại đúng sub-sitemap lỗi) → hiện trên bảng crawl trực tiếp ở FE, bỏ qua khối đó, tiếp tục các sub-sitemap khác (2026-06-26) |
 | Website không có sitemap | Tự động fallback sang listing page crawler (chưa code — Slice 2) |
 | Dữ liệu trùng lặp | Check SHA256(url) trước khi insert — bỏ qua nếu đã tồn tại |
+| Bài viết crawl được nhưng ngày đăng thật nằm ngoài `date_from`/`date_to` yêu cầu | Bỏ qua âm thầm, không insert (không phải lỗi) — cần thiết vì 1 số nguồn có sitemap không lọc được chính xác theo ngày trước khi fetch (VD `bocongan.gov.vn` ghi `<lastmod>` giống nhau cho mọi URL, không phải ngày đăng thật) (2026-06-29) |
 | AI confidence < 0.6 | Flag `needs_review=true`, vẫn lưu và đưa vào báo cáo |
 | AI trả về JSON không hợp lệ | Parse với try/except, retry 1 lần, nếu vẫn lỗi thì skip bài đó (`status="error"`) |
 | Nội dung bài viết dài hơn `AI_MAX_CONTENT_LENGTH` | Cắt tại ranh giới câu gần nhất (`.`, `!`, `?`, xuống dòng) trước khi gửi AI, không cắt cứng giữa câu/từ — xem [07 · AI Pipeline](.claude/rules/07-ai-pipeline.md) |
