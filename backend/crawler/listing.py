@@ -51,12 +51,24 @@ def get_listing_urls(
 
         soup = BeautifulSoup(resp.text, "html.parser")
         rules = source.parsing_rules
+        items = soup.select(rules["listing_item"])
+        if not items:
+            # Fetch trang OK nhưng selector không khớp item nào — có thể HTML đã đổi cấu trúc,
+            # không phải do thực sự không có bài nào trong khoảng ngày. Log để phát hiện sớm,
+            # vẫn trả về rỗng (không đổi contract trả về của hàm).
+            logger.warning(
+                "Fetch trang danh sách OK nhưng selector '%s' không khớp item nào: %s",
+                rules["listing_item"],
+                source.listing_url,
+            )
         results = []
-        for item in soup.select(rules["listing_item"]):
+        for item in items:
             link_el = item.select_one(rules["listing_link"])
             date_el = item.select_one(rules["listing_date"])
             if link_el is None or date_el is None:
                 continue
+            # Giả định href là URL tuyệt đối — đã verify đúng trên tingia.gov.vn qua curl;
+            # nguồn listing-page khác sau này nếu trả href tương đối thì cần xử lý qua urljoin.
             url = link_el.get("href")
             published = _parse_listing_date(date_el.get_text(strip=True))
             if url and published and date_from <= published <= date_to:
