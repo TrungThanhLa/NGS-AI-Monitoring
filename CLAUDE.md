@@ -148,7 +148,7 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 - [x] Listing page crawler (fallback khi nguồn không có sitemap) — `backend/crawler/listing.py`, phạm vi 1 trang không phân trang (YAGNI, chỉ tingia.gov.vn cần đến hiện tại)
 - [x] Config & test 6 nguồn thực tế (VTV, VOV, VietnamPlus, CAND, BoCongAn, TinGia — ít hơn ước tính gốc 8–10, xem "Vấn đề cần làm rõ" dưới) — toàn bộ 5 nguồn mới dùng engine Crawl4AI (`parsing_rules.engine = "crawl4ai"`), không viết CSS selector tay
 - [x] FE: sidebar chọn nhiều nguồn (search, group theo nhóm kênh), tag nguồn đã chọn, summary card ước tính số bài/thời gian, preset ngày (7/30/90/150), warning khi ≥5 nguồn & ≥60 ngày
-- **Verify:** crawl thành công ≥8 nguồn thực tế (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại) — **đã verify ở mức unit test + migration thật** (sitemap/listing parser, dispatch chiến lược, lọc ngày đăng thật sau fetch, seed 6 nguồn qua `alembic upgrade head`); **chưa chạy job thật end-to-end với nguồn mới** — xem Task 10 ở `docs/superpowers/plans/2026-06-29-slice2-multi-source.md` (còn chờ thực hiện). Dedup giữ nguyên cơ chế cũ (SHA256(url))
+- **Verify:** crawl thành công 6 nguồn thực tế đã config (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại) — **đã verify ở mức unit test + migration thật** (sitemap/listing parser, dispatch chiến lược, lọc ngày đăng thật sau fetch, seed 6 nguồn qua `alembic upgrade head`); **chưa chạy job thật end-to-end với nguồn mới** — xem Task 10 ở `docs/superpowers/plans/2026-06-29-slice2-multi-source.md` (còn chờ thực hiện). Dedup giữ nguyên cơ chế cũ (SHA256(url))
 
 ### Slice 3 — AI pipeline đầy đủ
 - [ ] Prompt phân loại đầy đủ 8 nhóm chủ đề + keyword + sentiment + `emotion` (6 lớp)
