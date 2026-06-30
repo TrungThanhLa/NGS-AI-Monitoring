@@ -81,11 +81,11 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 ### Trạng thái hiện tại
 - Slice 0 + Slice 1 (gồm phần mở rộng): hoàn thành, đã merge `main`
 - Crawl4AI engine: code xong, verify thật trên VTV/VOV qua lời gọi hàm trực tiếp — nay đã dùng thật cho 5/6 nguồn cấu hình ở Slice 2 (xem dưới)
-- Slice 2: code xong (sitemap tổng quát hóa, listing-page crawler, 6 nguồn seed qua migration, FE sidebar/summary/preset), verify ở mức unit test + migration thật — **chưa chạy job thật end-to-end với nguồn mới** (còn chờ thực hiện, xem Roadmap dưới)
+- Slice 2: code xong + **đã verify job thật end-to-end với 2 nguồn mới (VOV, BoCongAn)** — xem kết quả chi tiết ở dòng Verify Slice 2 dưới
 - Slice 3–6: chưa bắt đầu
 
 ### Bước tiếp theo
-1. Chạy job thật end-to-end với ≥1 nguồn mới của Slice 2 để verify thật (sitemap tổng quát hóa, listing-page, lọc ngày đăng thật sau fetch) — chi tiết ở Roadmap dưới
+1. Bắt đầu Slice 3 (AI pipeline đầy đủ: prompt 8 nhóm + batch processing)
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
@@ -121,6 +121,7 @@ Mọi task phải quy về tiêu chí kiểm tra được, không dừng ở "ch
 - **Số nguồn ước tính ở Slice 2** ghi "8–10 nguồn thực tế" nhưng theo `content_survey.docx` thực tế là ~11–12 nguồn, khớp pilot test 11/40 — chưa sửa số trong roadmap
 - **Số nguồn Slice 2 chỉ đạt 6 (không phải 8–10)** — đã xác nhận 6 nguồn crawl được thật (VTV+VOV+VietnamPlus+CAND+BoCongAn+TinGia); qdnd.vn bị loại do lỗi redirect-loop chưa rõ nguyên nhân (xem bảng quyết định); chinhphu.vn/mod.gov.vn/bvhttdl.gov.vn không có bài chuyên tin giả theo khảo sát thật — người dùng xác nhận 6 nguồn là đủ cho slice này, không ép đủ số
 - **Hằng số `ESTIMATED_SECONDS_PER_ARTICLE = 90` ở `SummaryCard.tsx`** là ước lượng thô, chưa có benchmark thật trên nhiều nguồn — cần điều chỉnh lại khi Slice 3 có dữ liệu benchmark thật trên ≥50 bài
+- **Nhánh lọc `published_at` thật sau fetch cho BoCongAn (Task 3) chưa được verify với trường hợp thật sự bị loại bỏ** — lần verify job thật (2026-06-30, xem Verify Slice 2) chỉ lấy được 4 URL đầu của sitemap phẳng (đều là trang tĩnh, `published_at=NULL`, không kích hoạt điều kiện lọc); cần chạy lại với `MAX_ARTICLES_PER_JOB` cao hơn hoặc trỏ thẳng vào URL bài tin theo ngày thật (nằm sau trong 500 URL của sitemap) để xác nhận nhánh lọc thật sự loại đúng bài ngoài khoảng ngày
 
 ## Roadmap — Vertical Slices
 
@@ -148,7 +149,7 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 - [x] Listing page crawler (fallback khi nguồn không có sitemap) — `backend/crawler/listing.py`, phạm vi 1 trang không phân trang (YAGNI, chỉ tingia.gov.vn cần đến hiện tại)
 - [x] Config & test 6 nguồn thực tế (VTV, VOV, VietnamPlus, CAND, BoCongAn, TinGia — ít hơn ước tính gốc 8–10, xem "Vấn đề cần làm rõ" dưới) — toàn bộ 5 nguồn mới dùng engine Crawl4AI (`parsing_rules.engine = "crawl4ai"`), không viết CSS selector tay
 - [x] FE: sidebar chọn nhiều nguồn (search, group theo nhóm kênh), tag nguồn đã chọn, summary card ước tính số bài/thời gian, preset ngày (7/30/90/150), warning khi ≥5 nguồn & ≥60 ngày
-- **Verify:** crawl thành công 6 nguồn thực tế đã config (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại) — **đã verify ở mức unit test + migration thật** (sitemap/listing parser, dispatch chiến lược, lọc ngày đăng thật sau fetch, seed 6 nguồn qua `alembic upgrade head`); **chưa chạy job thật end-to-end với nguồn mới** — xem Task 10 ở `docs/superpowers/plans/2026-06-29-slice2-multi-source.md` (còn chờ thực hiện). Dedup giữ nguyên cơ chế cũ (SHA256(url))
+- **Verify:** crawl thành công 6 nguồn thực tế đã config (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại) — **đã verify ở mức unit test + migration thật** (sitemap/listing parser, dispatch chiến lược, lọc ngày đăng thật sau fetch, seed 6 nguồn qua `alembic upgrade head`) **và đã chạy job thật end-to-end với 2 nguồn mới (2026-06-30):** tạo 2 job riêng qua `POST /api/reports/create` (`MAX_ARTICLES_PER_JOB=4` để giới hạn thời gian chạy AI CPU-only) — VOV (`job 32f0bcaa...`): 4 bài sitemap-index lastmod-đáng-tin crawl thành công + AI phân tích xong cả 4 (`status=completed`); BoCongAn (`job e4a6b316...`): 4 bài sitemap phẳng (không có index, đúng nhánh code mới — xem Task 1) crawl thành công + AI phân tích xong cả 4 (`status=completed`). Cả 2 job sinh `.docx` hợp lệ (`file` xác nhận `Microsoft Word 2007+`, không rỗng) + `.json` hợp lệ. Không có article nào lỗi (`status="error"`), không có exception trong log worker. **Giới hạn thật của lần verify này (ghi nhận trung thực):** do `MAX_ARTICLES_PER_JOB=4`, 4 URL đầu crawl được từ sitemap phẳng của BoCongAn đều là trang tĩnh (trang chủ, trang lãnh đạo, infographic — không phải bài tin theo ngày) nên `published_at` rút ra được là `NULL` cho cả 4 bài; nhánh lọc lại theo `published_at` thật sau fetch (an toàn hơn tin `<lastmod>` giả — xem Task 3) có chạy nhưng **không có cơ hội thật sự loại bỏ bài nào** trong lần verify này (vì điều kiện `if published_at and not (...)` không kích hoạt khi `published_at=None`) — đã xác nhận qua `curl` trực tiếp sitemap rằng 500 URL có thật, các bài tin theo ngày thật nằm ở vị trí sau trong sitemap (ngoài phạm vi 4 bài đã lấy). Phần đã verify chắc chắn: code nhận diện đúng sitemap phẳng (không index) và không trả về 0 bài như code cũ trước Slice 2. Dedup giữ nguyên cơ chế cũ (SHA256(url))
 
 ### Slice 3 — AI pipeline đầy đủ
 - [ ] Prompt phân loại đầy đủ 8 nhóm chủ đề + keyword + sentiment + `emotion` (6 lớp)
