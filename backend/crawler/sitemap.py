@@ -10,31 +10,59 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# VTV: sitemaps-YYYY-MM-DD_start-DD_end.xml (khoảng ngày trong 1 tháng)
-_DATE_RANGE_RE = re.compile(r"sitemaps-(\d+)-(\d+)-(\d+)-(\d+)\.xml$")
-# VOV/VietnamPlus/CAND: chỉ năm-tháng, không có khoảng ngày trong tên
-# (VD .../2026/5/article.xml hoặc news-2026-6.xml)
-_YEAR_MONTH_RE = re.compile(r"(?:^|[/-])(\d{4})[/-](\d{1,2})(?:[/.]|$)")
+# Mỗi domain có regex riêng với named groups — không dùng chung regex dễ false-positive.
+# Named groups quy ước:
+#   year + month + day_start + day_end → sub-sitemap chia theo khoảng ngày trong tháng
+#   year + month (không có day_*) → sub-sitemap chia theo tháng, tự tính ngày cuối
+# Domain không có entry → pattern=None → không pre-filter, fetch tất cả (safe fallback).
+#
+# Khi thêm nguồn mới: verify URL thật từ sitemap bằng curl trước khi điền regex,
+# không đoán pattern từ tên miền.
+_SITEMAP_DATE_PATTERNS: dict[str, re.Pattern] = {
+    # VD: https://vtv.vn/sitemaps/sitemaps-2026-6-21-25.xml
+    "vtv.vn": re.compile(
+        r"sitemaps-(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day_start>\d{1,2})-(?P<day_end>\d{1,2})\.xml$"
+    ),
+    # VD: https://vov.vn/sitemaps/2026/6/article.xml
+    "vov.vn": re.compile(
+        r"/(?P<year>\d{4})/(?P<month>\d{1,2})/"
+    ),
+    # VD: https://www.vietnamplus.vn/sitemaps/news-2026-7.xml (verified 2026-07-01)
+    "vietnamplus.vn": re.compile(
+        r"news-(?P<year>\d{4})-(?P<month>\d{1,2})\.xml$"
+    ),
+    # VD: https://cand.vn/sitemaps/news-2026-7.xml (verified 2026-07-01)
+    "cand.vn": re.compile(
+        r"news-(?P<year>\d{4})-(?P<month>\d{1,2})\.xml$"
+    ),
+}
 
 
 def _parse_lastmod(value: str) -> date:
     return datetime.fromisoformat(value).date()
 
 
-def _sub_sitemap_date_range(loc: str) -> tuple[date, date] | None:
-    match = _DATE_RANGE_RE.search(loc)
-    if match:
-        year, month, day_start, day_end = (int(g) for g in match.groups())
-        return date(year, month, day_start), date(year, month, day_end)
+def _sub_sitemap_date_range(loc: str, pattern: re.Pattern | None) -> tuple[date, date] | None:
+    if pattern is None:
+        return None
 
-    match = _YEAR_MONTH_RE.search(loc)
-    if match:
-        year, month = int(match.group(1)), int(match.group(2))
-        if 1 <= month <= 12:
-            day_end = calendar.monthrange(year, month)[1]
-            return date(year, month, 1), date(year, month, day_end)
+    match = pattern.search(loc)
+    if not match:
+        logger.warning("sub-sitemap URL không khớp pattern đã khai: %s", loc)
+        return None
 
-    return None
+    groups = match.groupdict()
+    year, month = int(groups["year"]), int(groups["month"])
+
+    if not (1 <= month <= 12):
+        logger.warning("month không hợp lệ (%d) trong URL: %s", month, loc)
+        return None
+
+    if "day_start" in groups:
+        return date(year, month, int(groups["day_start"])), date(year, month, int(groups["day_end"]))
+
+    day_end = calendar.monthrange(year, month)[1]
+    return date(year, month, 1), date(year, month, day_end)
 
 
 def _ranges_overlap(a_start: date, a_end: date, b_start: date, b_end: date) -> bool:
@@ -94,10 +122,11 @@ def get_article_urls(
             # xong từng bài.
             return _extract_all_urls(index_soup), []
 
+        pattern = _SITEMAP_DATE_PATTERNS.get(source.domain)
         sub_sitemap_locs = []
         for sitemap_tag in sitemap_tags:
             loc = sitemap_tag.find("loc").get_text(strip=True)
-            date_range = _sub_sitemap_date_range(loc)
+            date_range = _sub_sitemap_date_range(loc, pattern)
             # Không nhận diện được pattern ngày trong tên (VD chia theo chủ đề như
             # tingia.gov.vn) -> không pre-filter, luôn fetch để lọc theo <lastmod> thật bên
             # trong (an toàn hơn bỏ qua nhầm).
