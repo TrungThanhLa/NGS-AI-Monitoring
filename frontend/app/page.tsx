@@ -10,6 +10,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000"
 const JOB_ID_STORAGE_KEY = "ngs_monitor_job_id";
 
 const DATE_PRESETS = [
+  { label: "Hôm nay", days: 0 },
   { label: "7 ngày", days: 7 },
   { label: "30 ngày", days: 30 },
   { label: "90 ngày", days: 90 },
@@ -143,11 +144,11 @@ export default function Home() {
     }
   }
 
-  const disabled = !dateFrom || !dateTo || dateFrom >= dateTo || selectedSourceIds.length === 0;
+  const disabled = !dateFrom || !dateTo || dateFrom > dateTo || selectedSourceIds.length === 0;
   const canCancel = status?.status === "pending" || status?.status === "running";
 
   return (
-    <main className="p-8 max-w-3xl">
+    <main className="p-8 max-w-4xl">
       <h1 className="text-2xl font-bold mb-4">NGS Monitor</h1>
 
       <div className="mb-4 grid grid-cols-2 gap-4">

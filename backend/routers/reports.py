@@ -23,8 +23,8 @@ class CreateReportRequest(BaseModel):
 
 @router.post("/create")
 def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
-    if payload.date_from >= payload.date_to:
-        raise HTTPException(status_code=400, detail="date_from phải nhỏ hơn date_to")
+    if payload.date_from > payload.date_to:
+        raise HTTPException(status_code=400, detail="date_from không được lớn hơn date_to")
 
     sources = db.query(Source).filter(Source.source_id.in_(payload.source_ids)).all()
     if len(sources) != len(payload.source_ids):
