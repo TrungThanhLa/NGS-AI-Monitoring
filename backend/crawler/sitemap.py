@@ -58,7 +58,7 @@ def _sub_sitemap_date_range(loc: str, pattern: re.Pattern | None) -> tuple[date,
         logger.warning("month không hợp lệ (%d) trong URL: %s", month, loc)
         return None
 
-    if "day_start" in groups:
+    if groups.get("day_start") is not None:
         return date(year, month, int(groups["day_start"])), date(year, month, int(groups["day_end"]))
 
     day_end = calendar.monthrange(year, month)[1]

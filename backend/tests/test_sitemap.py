@@ -67,7 +67,7 @@ def test_returns_only_urls_with_lastmod_inside_date_range_and_skips_irrelevant_s
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
     result, failed_locs = get_article_urls(
-        FakeSource(),
+        VTVSource(),
         date_from=date(2026, 6, 22),
         date_to=date(2026, 6, 24),
         client=client,
@@ -95,7 +95,7 @@ def test_skips_sub_sitemap_that_keeps_failing_after_retries_without_raising():
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
     result, failed_locs = get_article_urls(
-        FakeSource(),
+        VTVSource(),
         date_from=date(2026, 6, 22),
         date_to=date(2026, 6, 24),
         client=client,
@@ -145,7 +145,8 @@ def test_flat_urlset_returns_all_urls_without_lastmod_filtering():
 
 
 def test_recognizes_year_month_only_sub_sitemap_pattern():
-    # VOV/VietnamPlus/CAND dùng pattern khác VTV: chỉ năm-tháng (không có khoảng ngày trong tên)
+    # VOV dùng pattern path-based (/YYYY/M/): year+month, không có khoảng ngày trong tên sub-sitemap.
+    # Sub-sitemap tháng 4 không giao với yêu cầu tháng 6 → không được fetch.
     index_xml = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <sitemap>
@@ -176,7 +177,7 @@ def test_recognizes_year_month_only_sub_sitemap_pattern():
     client = httpx.Client(transport=httpx.MockTransport(handler))
 
     result, failed_locs = get_article_urls(
-        FakeSource(),
+        VOVSource(),
         date_from=date(2026, 6, 10),
         date_to=date(2026, 6, 20),
         client=client,
