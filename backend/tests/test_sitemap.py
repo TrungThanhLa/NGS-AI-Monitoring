@@ -23,6 +23,18 @@ class VOVSource:
     domain = "vov.vn"
 
 
+class VietnamPlusSource:
+    """VietnamPlus: regex năm-tháng, filename-based (news-YYYY-M.xml)."""
+    sitemap_url = "https://www.vietnamplus.vn/sitemap.xml"
+    domain = "vietnamplus.vn"
+
+
+class CANDSource:
+    """CAND: regex năm-tháng, filename-based (news-YYYY-M.xml) — giống VietnamPlus."""
+    sitemap_url = "https://cand.vn/sitemap.xml"
+    domain = "cand.vn"
+
+
 SITEMAP_INDEX = """<?xml version="1.0" encoding="UTF-8"?>
 <sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <sitemap>
@@ -326,4 +338,76 @@ def test_unknown_domain_fetches_all_sub_sitemaps_as_safe_fallback():
     assert "https://vtv.vn/sitemaps/sitemaps-2026-6-01-10.xml" in requested
     assert "https://vtv.vn/sitemaps/sitemaps-2026-6-21-25.xml" in requested
     assert result == []
+    assert failed_locs == []
+
+
+def test_vietnamplus_domain_pre_filters_by_news_filename_pattern():
+    # domain="vietnamplus.vn" → regex news-YYYY-M.xml (year+month) → chỉ fetch sub-sitemap
+    # của tháng giao với yêu cầu; sub-sitemap tháng 4 không được fetch khi yêu cầu tháng 6.
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://www.vietnamplus.vn/sitemaps/news-2026-4.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnamplus.vn/sitemaps/news-2026-6.xml</loc></sitemap>
+</sitemapindex>"""
+    sub_sitemap_june = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>https://www.vietnamplus.vn/bai-viet-thang-6</loc>
+        <lastmod>2026-06-15T10:00:00+07:00</lastmod>
+    </url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "news-2026-6" in str(request.url):
+            return httpx.Response(200, text=sub_sitemap_june)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VietnamPlusSource(), date_from=date(2026, 6, 10), date_to=date(2026, 6, 20),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://www.vietnamplus.vn/bai-viet-thang-6"]
+    assert "https://www.vietnamplus.vn/sitemaps/news-2026-4.xml" not in requested
+    assert failed_locs == []
+
+
+def test_cand_domain_pre_filters_by_news_filename_pattern():
+    # domain="cand.vn" → cùng pattern news-YYYY-M.xml như VietnamPlus — mỗi domain có entry
+    # riêng trong dict dù pattern string giống nhau, để sau này sửa độc lập.
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://cand.vn/sitemaps/news-2026-4.xml</loc></sitemap>
+    <sitemap><loc>https://cand.vn/sitemaps/news-2026-6.xml</loc></sitemap>
+</sitemapindex>"""
+    sub_sitemap_june = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>https://cand.vn/bai-viet-thang-6</loc>
+        <lastmod>2026-06-15T10:00:00+07:00</lastmod>
+    </url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "news-2026-6" in str(request.url):
+            return httpx.Response(200, text=sub_sitemap_june)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        CANDSource(), date_from=date(2026, 6, 10), date_to=date(2026, 6, 20),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://cand.vn/bai-viet-thang-6"]
+    assert "https://cand.vn/sitemaps/news-2026-4.xml" not in requested
     assert failed_locs == []
