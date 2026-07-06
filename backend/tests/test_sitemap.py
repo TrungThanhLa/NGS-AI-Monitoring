@@ -377,6 +377,48 @@ def test_vietnamplus_domain_pre_filters_by_news_filename_pattern():
     assert failed_locs == []
 
 
+def test_vietnamplus_skips_non_news_sub_sitemaps_when_domain_has_pattern():
+    # Reproduce bug thật (2026-07-01): sitemapindex VietnamPlus chứa categories.xml, topics.xml,
+    # google-news.xml cùng lastmod hôm nay — các URL này không khớp pattern news-YYYY-M.xml
+    # của domain, phải bị bỏ qua hoàn toàn, KHÔNG được fetch và KHÔNG được trả về URL trang
+    # danh mục như URL bài viết.
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://www.vietnamplus.vn/sitemaps/categories.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnamplus.vn/sitemaps/topics.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnamplus.vn/sitemaps/news-2026-7.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnamplus.vn/sitemaps/google-news.xml</loc></sitemap>
+</sitemapindex>"""
+    news_sitemap = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>https://www.vietnamplus.vn/bai-viet-thang-7</loc>
+        <lastmod>2026-07-01T10:00:00+07:00</lastmod>
+    </url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "news-2026-7" in str(request.url):
+            return httpx.Response(200, text=news_sitemap)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VietnamPlusSource(), date_from=date(2026, 7, 1), date_to=date(2026, 7, 1),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://www.vietnamplus.vn/bai-viet-thang-7"]
+    assert "https://www.vietnamplus.vn/sitemaps/categories.xml" not in requested
+    assert "https://www.vietnamplus.vn/sitemaps/topics.xml" not in requested
+    assert "https://www.vietnamplus.vn/sitemaps/google-news.xml" not in requested
+    assert failed_locs == []
+
+
 def test_cand_domain_pre_filters_by_news_filename_pattern():
     # domain="cand.vn" → cùng pattern news-YYYY-M.xml như VietnamPlus — mỗi domain có entry
     # riêng trong dict dù pattern string giống nhau, để sau này sửa độc lập.

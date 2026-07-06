@@ -126,12 +126,24 @@ def get_article_urls(
         sub_sitemap_locs = []
         for sitemap_tag in sitemap_tags:
             loc = sitemap_tag.find("loc").get_text(strip=True)
-            date_range = _sub_sitemap_date_range(loc, pattern)
-            # Không nhận diện được pattern ngày trong tên (VD chia theo chủ đề như
-            # tingia.gov.vn) -> không pre-filter, luôn fetch để lọc theo <lastmod> thật bên
-            # trong (an toàn hơn bỏ qua nhầm).
-            if date_range is None or _ranges_overlap(date_range[0], date_range[1], date_from, date_to):
+            if pattern is None:
+                # Domain chưa khai pattern → không pre-filter, fetch tất cả sub-sitemap,
+                # lọc theo <lastmod> của từng <url> bên trong.
                 sub_sitemap_locs.append(loc)
+            else:
+                date_range = _sub_sitemap_date_range(loc, pattern)
+                if date_range is None:
+                    # URL không khớp pattern của domain → không phải sitemap bài viết, bỏ qua.
+                    continue
+                if _ranges_overlap(date_range[0], date_range[1], date_from, date_to):
+                    sub_sitemap_locs.append(loc)
+
+        if pattern is not None and not sub_sitemap_locs:
+            logger.warning(
+                "Không có sub-sitemap nào khớp pattern của %s trong khoảng %s–%s"
+                " — kiểm tra lại _SITEMAP_DATE_PATTERNS hoặc cấu trúc sitemap đã đổi",
+                source.domain, date_from, date_to,
+            )
 
         results = []
         failed_locs = []

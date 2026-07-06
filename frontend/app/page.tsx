@@ -72,7 +72,8 @@ export default function Home() {
   }
 
   const parsedDayCount = Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86400000);
-  const dayCount = Number.isFinite(parsedDayCount) ? Math.max(0, parsedDayCount) : 0;
+  // Từ ngày = Đến ngày (VD preset "Hôm nay") vẫn là 1 ngày thực tế, không phải 0
+  const dayCount = Number.isFinite(parsedDayCount) ? Math.max(1, parsedDayCount) : 1;
 
   function updateStatus(data: JobStatus) {
     setStatus(data);
