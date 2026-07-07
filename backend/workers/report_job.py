@@ -31,7 +31,12 @@ def _parse_max_articles(raw: str | None) -> int | None:
 
 
 def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
-    # Sitemap luôn được ưu tiên khi nguồn có khai sitemap_url; chỉ dùng listing-page khi
+    # parsing_rules.listing_pages (nhiều trang chuyên mục, VD bocongan.gov.vn) luôn được ưu
+    # tiên cao nhất — kể cả khi nguồn vẫn còn khai sitemap_url (sitemap không đáng tin/đóng
+    # băng thì cấu hình listing_pages thay thế, không cần xoá sitemap_url khỏi DB).
+    if source.parsing_rules.get("listing_pages"):
+        return get_listing_urls(source, date_from, date_to)
+    # Sitemap được ưu tiên khi nguồn có khai sitemap_url; chỉ dùng listing-page 1 trang khi
     # nguồn không có sitemap (VD tingia.gov.vn) — đúng thứ tự ưu tiên ở 06-crawler-strategy.md
     if source.listing_url and not source.sitemap_url:
         return get_listing_urls(source, date_from, date_to)
@@ -98,7 +103,14 @@ def _crawl_sources(db, job: Job) -> None:
                 db.commit()
                 continue
 
-            published_at = parsed.get("published_at")
+            # Một số nguồn (VD bocongan.gov.vn) không có published_at từ chính trang bài viết
+            # (thiếu meta article:published_time) — dùng lại ngày đã lấy từ trang danh sách
+            # (candidate["lastmod"], đã lọc date_from/date_to ở bước lấy candidate) làm dự
+            # phòng, ưu tiên published_at thật nếu có.
+            candidate_lastmod = candidate.get("lastmod")
+            published_at = parsed.get("published_at") or (
+                datetime.combine(candidate_lastmod, datetime.min.time()) if candidate_lastmod else None
+            )
             if published_at and not (job.date_from <= published_at.date() <= job.date_to):
                 # Sitemap phẳng/listing-page không lọc được chính xác theo ngày trước khi fetch
                 # (VD bocongan.gov.vn ghi <lastmod> giống nhau cho mọi URL, không phải ngày đăng
@@ -116,7 +128,7 @@ def _crawl_sources(db, job: Job) -> None:
                     title=parsed["title"],
                     content_raw=parsed["content_raw"],
                     author=parsed["author"],
-                    published_at=parsed["published_at"],
+                    published_at=published_at,
                     crawl_duration_seconds=parsed.get("crawl_duration_seconds"),
                 )
             )

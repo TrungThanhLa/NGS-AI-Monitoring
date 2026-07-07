@@ -255,6 +255,38 @@ def test_crawl_sources_uses_listing_strategy_when_source_has_listing_url_and_no_
         db_session.commit()
 
 
+def test_crawl_sources_prefers_listing_pages_over_sitemap_when_both_configured(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(
+        name="Test Multi Listing",
+        domain=f"test-multi-listing-{uuid.uuid4()}.example",
+        group_name="Test",
+        sitemap_url="https://example.test/sitemap.xml",
+        listing_url=None,
+        parsing_rules={"listing_pages": ["https://example.test/chuyen-muc/a"]},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    try:
+        with patch("backend.workers.report_job.get_listing_urls", return_value=([], [])) as mock_listing, patch(
+            "backend.workers.report_job.get_article_urls"
+        ) as mock_sitemap, patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        mock_listing.assert_called_once()
+        mock_sitemap.assert_not_called()
+    finally:
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
 def test_crawl_sources_skips_insert_when_published_at_outside_requested_range(db_session, monkeypatch):
     monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
 
@@ -326,6 +358,85 @@ def test_crawl_sources_inserts_when_published_at_inside_requested_range(db_sessi
 
         count = db_session.query(Article).filter_by(job_id=job.job_id).count()
         assert count == 1
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_falls_back_to_listing_lastmod_when_published_at_missing(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    candidates = [{"url": "https://example.test/bai-viet/a", "lastmod": date(2026, 6, 15)}]
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url,
+            "url_hash": f"hash-{url}",
+            "title": "Title",
+            "content_raw": "Content",
+            "author": None,
+            "published_at": None,  # giống bocongan.gov.vn thật: thiếu meta article:published_time
+            "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        article = db_session.query(Article).filter_by(job_id=job.job_id).one()
+        assert article.published_at == datetime(2026, 6, 15, 0, 0)
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_prefers_parsed_published_at_over_listing_lastmod(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    candidates = [{"url": "https://example.test/bai-viet/a", "lastmod": date(2026, 6, 15)}]
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url,
+            "url_hash": f"hash-{url}",
+            "title": "Title",
+            "content_raw": "Content",
+            "author": None,
+            "published_at": datetime(2026, 6, 20, 8, 0),  # có giá trị thật từ chính bài viết
+            "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        article = db_session.query(Article).filter_by(job_id=job.job_id).one()
+        # published_at thật từ bài viết phải được ưu tiên hơn lastmod của trang danh sách
+        assert article.published_at == datetime(2026, 6, 20, 8, 0)
     finally:
         db_session.query(Article).filter_by(job_id=job.job_id).delete()
         db_session.delete(job)
