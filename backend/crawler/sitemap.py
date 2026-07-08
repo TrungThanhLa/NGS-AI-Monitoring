@@ -85,7 +85,7 @@ def _fetch_with_retry(client: httpx.Client, url: str, max_retries: int) -> httpx
         except httpx.HTTPError:
             if attempt < max_retries - 1:
                 time.sleep(2**attempt)
-    logger.warning("Hết %d lượt thử, bỏ qua sub-sitemap: %s", max_retries, url)
+    logger.warning("Hết %d lượt thử, bỏ qua URL: %s", max_retries, url)
     return None
 
 
@@ -161,7 +161,18 @@ def get_article_urls(
                 client.close()
 
     try:
-        index_resp = client.get(source.sitemap_url)
+        index_resp = _fetch_with_retry(client, source.sitemap_url, max_retries)
+        if index_resp is None or index_resp.status_code >= 400:
+            # Site chặn tạm thời (403/WAF) hoặc lỗi mạng hết retry — KHÔNG được âm thầm coi
+            # như "sitemap phẳng không có bài" (bug thật đã gặp với vietnam.vn 2026-07-08: job
+            # báo completed với 0 bài, không ai biết là do bị chặn). Trả về như 1 URL lỗi để
+            # report_job.py insert Article(status="error"), hiện rõ trên bảng crawl trực tiếp.
+            if index_resp is not None:
+                logger.warning(
+                    "Fetch sitemap index thất bại (HTTP %d): %s",
+                    index_resp.status_code, source.sitemap_url,
+                )
+            return [], [source.sitemap_url]
         index_soup = BeautifulSoup(index_resp.text, "xml")
 
         sitemap_tags = index_soup.find_all("sitemap")

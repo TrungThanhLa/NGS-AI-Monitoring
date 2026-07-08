@@ -687,3 +687,37 @@ def test_vietnamvn_fetches_multiple_days_when_range_spans_several_files():
 
     assert sorted(item["url"] for item in result) == ["https://www.vietnam.vn/bai-07", "https://www.vietnam.vn/bai-08"]
     assert "https://www.vietnam.vn/sitemap/sitemap-post/2026-07-01.xml" not in requested
+
+
+def test_returns_index_url_as_failed_loc_when_sitemap_index_returns_error_status():
+    # Bug thật phát hiện 2026-07-08: vietnam.vn bị chặn tạm thời (403), trước đây code không
+    # check status trước khi parse → trang lỗi bị hiểu nhầm thành "sitemap phẳng không bài
+    # nào" → job báo completed với 0 bài, không có error_log nào, không ai biết là do bị chặn.
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, text="<html><body>Forbidden</body></html>")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VTVSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+        client=client, delay_seconds=0,
+    )
+
+    assert result == []
+    assert failed_locs == ["https://vtv.vn/sitemap.xml"]
+
+
+def test_returns_index_url_as_failed_loc_when_sitemap_index_request_raises():
+    # Lỗi network (connection error/timeout) khi fetch sitemap index — trước đây exception
+    # bay thẳng lên report_job.py (bị nuốt bởi except Exception chung, không insert error row
+    # nào cho URL index) — nay retry rồi trả về failed_loc như sub-sitemap lỗi, nhất quán hơn.
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VTVSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+        client=client, delay_seconds=0, max_retries=1,
+    )
+
+    assert result == []
+    assert failed_locs == ["https://vtv.vn/sitemap.xml"]
