@@ -23,5 +23,8 @@ class ArticleAnalysis(Base):
     # Version của prompt (backend/ai/prompts/vN.py) đã sinh ra bản phân tích này —
     # cần để không lẫn kết quả giữa các lần tinh chỉnh prompt ở Slice 3+.
     prompt_version = Column(Integer, nullable=False)
+    # Tên model AI đã dùng (VD "qwen3:8b") — cần để không lẫn dữ liệu khi sau này đổi
+    # model trên server GPU (xem CLAUDE.md, Slice 3).
+    ai_model = Column(String(255), nullable=False)
     analyzed_at = Column(TIMESTAMP, server_default=func.now())
     analysis_duration_seconds = Column(Float)
