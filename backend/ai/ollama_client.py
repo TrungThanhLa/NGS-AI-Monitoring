@@ -28,9 +28,9 @@ def _truncate_at_sentence_boundary(content: str, max_length: int) -> str:
     return window[: last_boundary + 1]
 
 
-def analyze_article(title: str, content: str, client: httpx.Client | None = None) -> dict:
+async def analyze_article(title: str, content: str, client: httpx.AsyncClient | None = None) -> dict:
     owns_client = client is None
-    client = client or httpx.Client(timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "360")))
+    client = client or httpx.AsyncClient(timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "360")))
 
     max_content_length = int(os.environ.get("AI_MAX_CONTENT_LENGTH", "5000"))
     confidence_threshold = float(os.environ.get("AI_CONFIDENCE_THRESHOLD", "0.6"))
@@ -45,7 +45,7 @@ def analyze_article(title: str, content: str, client: httpx.Client | None = None
         result = None
         last_error: Exception | None = None
         for _attempt in range(2):
-            response = client.post(
+            response = await client.post(
                 f"{os.environ['OLLAMA_BASE_URL']}/api/generate",
                 json={"model": os.environ["OLLAMA_MODEL"], "prompt": prompt, "stream": False},
             )
@@ -60,8 +60,9 @@ def analyze_article(title: str, content: str, client: httpx.Client | None = None
 
         result["needs_review"] = result.get("confidence", 1.0) < confidence_threshold
         result["prompt_version"] = PROMPT_VERSION
+        result["ai_model"] = os.environ["OLLAMA_MODEL"]
         result["analysis_duration_seconds"] = time.perf_counter() - start
         return result
     finally:
         if owns_client:
-            client.close()
+            await client.aclose()
