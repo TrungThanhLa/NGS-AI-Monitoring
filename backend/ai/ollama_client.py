@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import re
@@ -63,6 +64,30 @@ async def analyze_article(title: str, content: str, client: httpx.AsyncClient | 
         result["ai_model"] = os.environ["OLLAMA_MODEL"]
         result["analysis_duration_seconds"] = time.perf_counter() - start
         return result
+    finally:
+        if owns_client:
+            await client.aclose()
+
+
+async def analyze_articles_batch(
+    articles: list[tuple[str, str]],
+    concurrency: int,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict | Exception]:
+    owns_client = client is None
+    client = client or httpx.AsyncClient(timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "360")))
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def _bounded(title: str, content: str) -> dict:
+        async with semaphore:
+            return await analyze_article(title, content, client=client)
+
+    try:
+        tasks = [_bounded(title, content) for title, content in articles]
+        # return_exceptions=True: 1 bài lỗi (JSON không hợp lệ / lỗi HTTP) không được raise
+        # ra ngoài làm hỏng cả batch — trả về Exception ngay đúng vị trí bài đó, để caller
+        # (_analyze_articles trong report_job.py) tự quyết định insert status="error".
+        return await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         if owns_client:
             await client.aclose()

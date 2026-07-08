@@ -4,7 +4,7 @@ import json
 import httpx
 import pytest
 
-from backend.ai.ollama_client import analyze_article
+from backend.ai.ollama_client import analyze_article, analyze_articles_batch
 from backend.ai.prompts.v1 import PROMPT_VERSION
 
 VALID_JSON = """{
@@ -99,3 +99,46 @@ def test_truncates_content_at_sentence_boundary_not_mid_word(monkeypatch):
 
     assert "Câu đầu tiên ngắn." in captured["prompt"]
     assert "Câu thứ hai" not in captured["prompt"]
+
+
+def test_analyze_articles_batch_respects_concurrency_limit():
+    state = {"current": 0, "max_seen": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        state["current"] += 1
+        state["max_seen"] = max(state["max_seen"], state["current"])
+        await asyncio.sleep(0.05)
+        state["current"] -= 1
+        return httpx.Response(200, json={"response": VALID_JSON})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    articles = [(f"Tiêu đề {i}", "Nội dung") for i in range(6)]
+
+    results = asyncio.run(analyze_articles_batch(articles, concurrency=2, client=client))
+
+    assert len(results) == 6
+    assert all(isinstance(r, dict) for r in results)
+    assert state["max_seen"] == 2
+
+
+def test_analyze_articles_batch_isolates_single_failure_from_others():
+    call_count = {"i": 0}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        idx = call_count["i"]
+        call_count["i"] += 1
+        # 2 lệnh gọi đầu (bài đầu tiên, retry 1 lần) trả JSON lỗi -> ValueError,
+        # các lệnh gọi sau (bài 2, 3) trả JSON hợp lệ.
+        if idx < 2:
+            return httpx.Response(200, json={"response": "không phải json"})
+        return httpx.Response(200, json={"response": VALID_JSON})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    articles = [("Bài lỗi", "Nội dung"), ("Bài ổn 1", "Nội dung"), ("Bài ổn 2", "Nội dung")]
+
+    # concurrency=1 để đảm bảo thứ tự gọi đúng như handler giả lập ở trên
+    results = asyncio.run(analyze_articles_batch(articles, concurrency=1, client=client))
+
+    assert isinstance(results[0], ValueError)
+    assert isinstance(results[1], dict)
+    assert isinstance(results[2], dict)
