@@ -1,8 +1,9 @@
 import uuid
 from datetime import date, datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 
 from backend.models import Article, ArticleAnalysis, Job, Source
 from backend.workers.report_job import _analyze_articles, _crawl_sources
@@ -211,12 +212,176 @@ def test_analyze_articles_marks_error_on_http_timeout_and_continues(db_session):
     db_session.commit()
 
     try:
-        with patch("backend.workers.report_job.analyze_article", side_effect=httpx.ReadTimeout("timed out")):
+        with patch(
+            "backend.workers.report_job.analyze_articles_batch",
+            AsyncMock(return_value=[httpx.ReadTimeout("timed out")]),
+        ):
             _analyze_articles(db_session, job)
 
         db_session.refresh(article)
         assert article.status == "error"
         assert db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).count() == 0
+    finally:
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_analyze_articles_inserts_ai_model_from_result(db_session):
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        source_id=source.source_id,
+        url="https://example.test/ok-article",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Title",
+        content_raw="Content",
+        status="pending_analysis",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_result = {
+        "topics": ["Tin giả và thông tin sai lệch"],
+        "keywords": ["deepfake"],
+        "sentiment": "negative",
+        "emotion": "Fear",
+        "confidence": 0.85,
+        "needs_review": False,
+        "summary": "Tóm tắt.",
+        "prompt_version": 1,
+        "ai_model": "qwen3:8b",
+        "analysis_duration_seconds": 1.23,
+    }
+
+    try:
+        with patch(
+            "backend.workers.report_job.analyze_articles_batch",
+            AsyncMock(return_value=[fake_result]),
+        ):
+            _analyze_articles(db_session, job)
+
+        db_session.refresh(article)
+        assert article.status == "analyzed"
+        analysis = db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).one()
+        assert analysis.ai_model == "qwen3:8b"
+    finally:
+        db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).delete()
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_analyze_articles_reraises_unexpected_exception_type(db_session):
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        source_id=source.source_id,
+        url="https://example.test/bug-article",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Title",
+        content_raw="Content",
+        status="pending_analysis",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    try:
+        with patch(
+            "backend.workers.report_job.analyze_articles_batch",
+            AsyncMock(return_value=[RuntimeError("bug không lường trước")]),
+        ), pytest.raises(RuntimeError):
+            _analyze_articles(db_session, job)
+    finally:
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_analyze_articles_passes_ai_concurrency_env_var_to_batch(db_session, monkeypatch):
+    monkeypatch.setenv("AI_CONCURRENCY", "3")
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        source_id=source.source_id,
+        url="https://example.test/concurrency-article",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Title",
+        content_raw="Content",
+        status="pending_analysis",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_batch = AsyncMock(return_value=[httpx.ReadTimeout("timed out")])
+
+    try:
+        with patch("backend.workers.report_job.analyze_articles_batch", fake_batch):
+            _analyze_articles(db_session, job)
+
+        assert fake_batch.call_args.kwargs["concurrency"] == 3
+    finally:
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_analyze_articles_defaults_ai_concurrency_to_1_when_env_unset(db_session, monkeypatch):
+    monkeypatch.delenv("AI_CONCURRENCY", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        source_id=source.source_id,
+        url="https://example.test/default-concurrency-article",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Title",
+        content_raw="Content",
+        status="pending_analysis",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    fake_batch = AsyncMock(return_value=[httpx.ReadTimeout("timed out")])
+
+    try:
+        with patch("backend.workers.report_job.analyze_articles_batch", fake_batch):
+            _analyze_articles(db_session, job)
+
+        assert fake_batch.call_args.kwargs["concurrency"] == 1
     finally:
         db_session.delete(article)
         db_session.delete(job)

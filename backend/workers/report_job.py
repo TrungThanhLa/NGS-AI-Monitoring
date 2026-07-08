@@ -6,7 +6,7 @@ from datetime import datetime
 
 import httpx
 
-from backend.ai.ollama_client import analyze_article
+from backend.ai.ollama_client import analyze_articles_batch
 from backend.crawler.article import compute_url_hash
 from backend.crawler.crawl4ai_client import fetch_article_dispatch
 from backend.crawler.listing import get_listing_urls
@@ -138,14 +138,27 @@ def _crawl_sources(db, job: Job) -> None:
 
 def _analyze_articles(db, job: Job) -> None:
     pending = db.query(Article).filter_by(job_id=job.job_id, status="pending_analysis").all()
-    for article in pending:
-        try:
-            result = asyncio.run(analyze_article(article.title, article.content_raw))
-        except (ValueError, httpx.HTTPError):
-            logger.exception("AI phân tích lỗi cho bài %s", article.url)
+    if not pending:
+        return
+
+    # AI_CONCURRENCY: số bài AI xử lý đồng thời trong job này — mặc định 1, cho ra đúng
+    # hành vi tuần tự cũ (an toàn cho CPU-only). Chỉ tăng khi chạy trên hạ tầng có GPU
+    # (xem CLAUDE.md — checklist chuyển sang server).
+    concurrency = int(os.environ.get("AI_CONCURRENCY", "1"))
+    results = asyncio.run(
+        analyze_articles_batch([(a.title, a.content_raw) for a in pending], concurrency=concurrency)
+    )
+
+    for article, result in zip(pending, results):
+        if isinstance(result, (ValueError, httpx.HTTPError)):
+            logger.error("AI phân tích lỗi cho bài %s", article.url, exc_info=result)
             article.status = "error"
             db.commit()
             continue
+        if isinstance(result, Exception):
+            # Lỗi không thuộc loại đã biết (JSON không hợp lệ / lỗi HTTP) — không nuốt âm
+            # thầm, để job fail rõ ràng thay vì báo completed sai (xem 10-error-handling.md)
+            raise result
 
         db.add(
             ArticleAnalysis(
@@ -159,8 +172,8 @@ def _analyze_articles(db, job: Job) -> None:
                 needs_review=result["needs_review"],
                 summary=result.get("summary"),
                 prompt_version=result["prompt_version"],
+                ai_model=result["ai_model"],
                 analysis_duration_seconds=result.get("analysis_duration_seconds"),
-                ai_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
             )
         )
         article.status = "analyzed"
