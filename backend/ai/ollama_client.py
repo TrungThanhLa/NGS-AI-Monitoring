@@ -74,6 +74,9 @@ async def analyze_articles_batch(
     concurrency: int,
     client: httpx.AsyncClient | None = None,
 ) -> list[dict | Exception]:
+    if concurrency < 1:
+        raise ValueError(f"concurrency phải >= 1, nhận được {concurrency}")
+
     owns_client = client is None
     client = client or httpx.AsyncClient(timeout=int(os.environ.get("AI_TIMEOUT_SECONDS", "360")))
     semaphore = asyncio.Semaphore(concurrency)

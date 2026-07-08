@@ -142,3 +142,14 @@ def test_analyze_articles_batch_isolates_single_failure_from_others():
     assert isinstance(results[0], ValueError)
     assert isinstance(results[1], dict)
     assert isinstance(results[2], dict)
+
+
+def test_analyze_articles_batch_rejects_concurrency_below_1():
+    with pytest.raises(ValueError):
+        asyncio.run(analyze_articles_batch([("Tiêu đề", "Nội dung")], concurrency=0))
+
+
+def test_analyze_articles_batch_returns_empty_list_for_no_articles():
+    results = asyncio.run(analyze_articles_batch([], concurrency=1))
+
+    assert results == []
