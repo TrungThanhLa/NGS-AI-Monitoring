@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import time
@@ -139,7 +140,7 @@ def _analyze_articles(db, job: Job) -> None:
     pending = db.query(Article).filter_by(job_id=job.job_id, status="pending_analysis").all()
     for article in pending:
         try:
-            result = analyze_article(article.title, article.content_raw)
+            result = asyncio.run(analyze_article(article.title, article.content_raw))
         except (ValueError, httpx.HTTPError):
             logger.exception("AI phân tích lỗi cho bài %s", article.url)
             article.status = "error"
