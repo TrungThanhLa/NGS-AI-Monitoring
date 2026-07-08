@@ -9,30 +9,47 @@ class FakeSource:
     """Domain không có trong _SITEMAP_DATE_PATTERNS → pattern=None → fetch-all (safe fallback)."""
     sitemap_url = "https://vtv.vn/sitemap.xml"
     domain = "unknown.example.com"
+    parsing_rules = {}
 
 
 class VTVSource:
     """VTV: regex khoảng ngày trong tháng (day_start + day_end)."""
     sitemap_url = "https://vtv.vn/sitemap.xml"
     domain = "vtv.vn"
+    parsing_rules = {}
 
 
 class VOVSource:
     """VOV: regex năm-tháng, path-based (/YYYY/M/)."""
     sitemap_url = "https://vov.vn/sitemap.xml"
     domain = "vov.vn"
+    parsing_rules = {}
 
 
 class VietnamPlusSource:
     """VietnamPlus: regex năm-tháng, filename-based (news-YYYY-M.xml)."""
     sitemap_url = "https://www.vietnamplus.vn/sitemap.xml"
     domain = "vietnamplus.vn"
+    parsing_rules = {}
 
 
 class CANDSource:
     """CAND: regex năm-tháng, filename-based (news-YYYY-M.xml) — giống VietnamPlus."""
     sitemap_url = "https://cand.vn/sitemap.xml"
     domain = "cand.vn"
+    parsing_rules = {}
+
+
+class TinGiaSource:
+    """sitemap_url=None cố ý — nếu code lỡ đọc source.sitemap_url sẽ crash ngay, phát hiện sớm bug routing."""
+    sitemap_url = None
+    domain = "tingia.gov.vn"
+    parsing_rules = {
+        "sitemap_pages": [
+            "https://tingia.gov.vn/sitemap/tin-vua-check.xml",
+            "https://tingia.gov.vn/sitemap/multimedia.xml",
+        ]
+    }
 
 
 SITEMAP_INDEX = """<?xml version="1.0" encoding="UTF-8"?>
@@ -453,3 +470,97 @@ def test_cand_domain_pre_filters_by_news_filename_pattern():
     assert [item["url"] for item in result] == ["https://cand.vn/bai-viet-thang-6"]
     assert "https://cand.vn/sitemaps/news-2026-4.xml" not in requested
     assert failed_locs == []
+
+
+def test_sitemap_pages_fetches_only_declared_urls_without_touching_index():
+    # tingia.gov.vn: parsing_rules.sitemap_pages khai sẵn URL sub-sitemap cụ thể (curated thủ
+    # công, không phải index tự động) — sitemap_url=None cố ý để phát hiện sớm nếu code lỡ
+    # đọc nhầm sang nhánh index.
+    sub_a = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://tingia.gov.vn/bai-a</loc><lastmod>2026-06-15T00:00:00+07:00</lastmod></url>
+</urlset>"""
+    sub_b = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://tingia.gov.vn/bai-b</loc><lastmod>2026-06-16T00:00:00+07:00</lastmod></url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if "tin-vua-check" in str(request.url):
+            return httpx.Response(200, text=sub_a)
+        if "multimedia" in str(request.url):
+            return httpx.Response(200, text=sub_b)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        TinGiaSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+        client=client, delay_seconds=0,
+    )
+
+    assert sorted(item["url"] for item in result) == ["https://tingia.gov.vn/bai-a", "https://tingia.gov.vn/bai-b"]
+    assert not any(url.endswith("/sitemap.xml") for url in requested)
+    assert failed_locs == []
+
+
+def test_sitemap_pages_dedups_url_appearing_in_multiple_declared_sub_sitemaps():
+    # Sub-sitemap của tingia.gov.vn chia theo CHỦ ĐỀ/tag — 1 bài có thể được gắn nhiều tag,
+    # xuất hiện ở nhiều sub-sitemap. Không dedup sẽ khiến report_job.py fetch trùng 1 bài.
+    same_article = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://tingia.gov.vn/bai-trung</loc><lastmod>2026-06-15T00:00:00+07:00</lastmod></url>
+</urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=same_article)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        TinGiaSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://tingia.gov.vn/bai-trung"]
+    assert failed_locs == []
+
+
+def test_sitemap_pages_still_filters_by_lastmod_date_range():
+    mixed = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://tingia.gov.vn/bai-trong-khoang</loc><lastmod>2026-06-15T00:00:00+07:00</lastmod></url>
+    <url><loc>https://tingia.gov.vn/bai-ngoai-khoang</loc><lastmod>2025-01-01T00:00:00+07:00</lastmod></url>
+</urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=mixed)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        TinGiaSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://tingia.gov.vn/bai-trong-khoang"]
+
+
+def test_sitemap_pages_records_failed_loc_for_one_failing_sub_sitemap_others_still_processed():
+    ok_sitemap = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://tingia.gov.vn/bai-ok</loc><lastmod>2026-06-15T00:00:00+07:00</lastmod></url>
+</urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "tin-vua-check" in str(request.url):
+            raise httpx.ConnectError("boom", request=request)
+        return httpx.Response(200, text=ok_sitemap)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        TinGiaSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+        client=client, delay_seconds=0, max_retries=1,
+    )
+
+    assert [item["url"] for item in result] == ["https://tingia.gov.vn/bai-ok"]
+    assert failed_locs == ["https://tingia.gov.vn/sitemap/tin-vua-check.xml"]

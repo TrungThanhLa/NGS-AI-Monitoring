@@ -287,6 +287,41 @@ def test_crawl_sources_prefers_listing_pages_over_sitemap_when_both_configured(d
         db_session.commit()
 
 
+def test_crawl_sources_routes_sitemap_pages_source_through_get_article_urls(db_session, monkeypatch):
+    # tingia.gov.vn: sitemap_url=NULL, listing_url=NULL, danh sách sub-sitemap curated nằm ở
+    # parsing_rules.sitemap_pages — không nhánh listing nào (listing_url hay listing_pages)
+    # khớp, nên phải rơi đúng vào get_article_urls() (không cần sửa _get_candidates()).
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(
+        name="Test Sitemap Pages",
+        domain=f"test-sitemap-pages-{uuid.uuid4()}.example",
+        group_name="Test",
+        sitemap_url=None,
+        listing_url=None,
+        parsing_rules={"sitemap_pages": ["https://example.test/sitemap/a.xml"]},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=([], [])) as mock_sitemap, patch(
+            "backend.workers.report_job.get_listing_urls"
+        ) as mock_listing, patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        mock_sitemap.assert_called_once()
+        mock_listing.assert_not_called()
+    finally:
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
 def test_crawl_sources_skips_insert_when_published_at_outside_requested_range(db_session, monkeypatch):
     monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
 

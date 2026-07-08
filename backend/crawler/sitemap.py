@@ -94,6 +94,34 @@ def _extract_urls_in_range(soup: BeautifulSoup, date_from: date, date_to: date) 
     return [item for item in _extract_all_urls(soup) if item["lastmod"] and date_from <= item["lastmod"] <= date_to]
 
 
+def _fetch_declared_sitemap_pages(
+    sitemap_pages: list[str],
+    date_from: date,
+    date_to: date,
+    client: httpx.Client,
+    delay_seconds: float,
+    max_retries: int,
+) -> tuple[list[dict], list[str]]:
+    # Sub-sitemap chia theo CHỦ ĐỀ (VD tingia.gov.vn) — 1 bài có thể nằm ở nhiều sub-sitemap,
+    # dedup theo URL để không trả về trùng (tránh report_job.py fetch cùng 1 bài 2 lần).
+    seen: set[str] = set()
+    results: list[dict] = []
+    failed: list[str] = []
+    for loc in sitemap_pages:
+        time.sleep(delay_seconds)
+        resp = _fetch_with_retry(client, loc, max_retries)
+        if resp is None:
+            failed.append(loc)
+            continue
+        soup = BeautifulSoup(resp.text, "xml")
+        for item in _extract_urls_in_range(soup, date_from, date_to):
+            if item["url"] in seen:
+                continue
+            seen.add(item["url"])
+            results.append(item)
+    return results, failed
+
+
 def get_article_urls(
     source,
     date_from: date,
@@ -108,6 +136,20 @@ def get_article_urls(
         delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     if max_retries is None:
         max_retries = int(os.environ.get("CRAWLER_MAX_RETRIES", "3"))
+
+    sitemap_pages = source.parsing_rules.get("sitemap_pages")
+    if sitemap_pages:
+        # Danh sách sub-sitemap curated thủ công (VD tingia.gov.vn — top-level sitemap.xml là
+        # urlset phẳng trộn lẫn trang tĩnh + sub-sitemap chia theo tag, <lastmod> đóng băng ở
+        # top-level, không dùng được cơ chế index/_SITEMAP_DATE_PATTERNS hiện có). Không đụng
+        # source.sitemap_url — nguồn dùng nhánh này luôn có sitemap_url=NULL.
+        try:
+            return _fetch_declared_sitemap_pages(
+                sitemap_pages, date_from, date_to, client, delay_seconds, max_retries
+            )
+        finally:
+            if owns_client:
+                client.close()
 
     try:
         index_resp = client.get(source.sitemap_url)
