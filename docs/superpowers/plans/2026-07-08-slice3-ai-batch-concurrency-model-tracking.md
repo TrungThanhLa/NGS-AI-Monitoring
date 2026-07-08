@@ -947,10 +947,12 @@ AI_TIMEOUT_SECONDS=360
 AI_CONCURRENCY=1
 ```
 
-- [ ] **Step 5.3: Restart để nạp env mới**
+- [ ] **Step 5.3: Recreate container để nạp env mới**
+
+**LƯU Ý (phát hiện thật khi chạy task này 2026-07-08):** `docker compose restart` KHÔNG đọc lại `.env` cho container đã tồn tại — chỉ khởi động lại process bên trong container cũ, giữ nguyên env lúc container được tạo. Phải dùng `docker compose up -d` để Docker Compose phát hiện `.env` đổi và tạo lại container. (`postgres` cũng dùng `env_file: .env` nên có thể bị recreate theo — an toàn vì dùng named volume `pg_data`, không mất dữ liệu.)
 
 ```bash
-docker compose restart backend celery-worker
+docker compose up -d backend celery-worker
 ```
 
 - [ ] **Step 5.4: Commit** (chỉ `.env.example` — `.env` bị gitignore)
@@ -1158,10 +1160,10 @@ docker compose restart celery-worker
 
 - [ ] **Step 8.2: Set giới hạn 5 bài**
 
-Sửa `.env`: `MAX_ARTICLES_PER_JOB=5`, giữ `AI_CONCURRENCY=1`, rồi:
+Sửa `.env`: `MAX_ARTICLES_PER_JOB=5`, giữ `AI_CONCURRENCY=1`, rồi (LƯU Ý: đây là sửa `.env`, phải dùng `up -d` để recreate container — `restart` không đọc lại `.env`, xem bài học ở Task 5 Step 5.3):
 
 ```bash
-docker compose restart backend celery-worker
+docker compose up -d backend celery-worker
 ```
 
 - [ ] **Step 8.3: Tạo job thật** — `POST /api/reports/create` với 2-3 `source_ids` (trong 7 nguồn đã verify), khoảng ngày đủ rộng để ra 5 bài
@@ -1179,10 +1181,10 @@ docker compose restart backend celery-worker
 
 - [ ] **Step 9.1: Set giới hạn 15 bài**
 
-Sửa `.env`: `MAX_ARTICLES_PER_JOB=15`, rồi:
+Sửa `.env`: `MAX_ARTICLES_PER_JOB=15`, rồi (LƯU Ý: đây là sửa `.env`, phải dùng `up -d` để recreate container — `restart` không đọc lại `.env`, xem bài học ở Task 5 Step 5.3):
 
 ```bash
-docker compose restart backend celery-worker
+docker compose up -d backend celery-worker
 ```
 
 - [ ] **Step 9.2: Tạo job thật** — trải trên 4-5/7 nguồn đã verify, khoảng ngày đủ rộng để ra 15 bài
