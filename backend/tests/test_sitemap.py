@@ -40,6 +40,13 @@ class CANDSource:
     parsing_rules = {}
 
 
+class VietnamVNSource:
+    """vietnam.vn: sub-sitemap chia đúng 1 ngày/file (sitemap-post/YYYY-MM-DD.xml) — convention mới, khác VTV (khoảng ngày) và VOV/VN+/CAND (cả tháng)."""
+    sitemap_url = "https://www.vietnam.vn/sitemap.xml"
+    domain = "vietnam.vn"
+    parsing_rules = {}
+
+
 class TinGiaSource:
     """sitemap_url=None cố ý — nếu code lỡ đọc source.sitemap_url sẽ crash ngay, phát hiện sớm bug routing."""
     sitemap_url = None
@@ -564,3 +571,119 @@ def test_sitemap_pages_records_failed_loc_for_one_failing_sub_sitemap_others_sti
 
     assert [item["url"] for item in result] == ["https://tingia.gov.vn/bai-ok"]
     assert failed_locs == ["https://tingia.gov.vn/sitemap/tin-vua-check.xml"]
+
+
+def test_vietnamvn_domain_pre_filters_by_exact_day():
+    # domain="vietnam.vn" → regex day đơn lẻ → chỉ fetch sub-sitemap của đúng ngày giao yêu cầu
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-post/2026-07-05.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-post/2026-07-08.xml</loc></sitemap>
+</sitemapindex>"""
+    sub_sitemap_08 = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+        <loc>https://www.vietnam.vn/bai-viet-ngay-08</loc>
+        <lastmod>2026-07-08T04:04:10.339Z</lastmod>
+    </url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "2026-07-08" in str(request.url):
+            return httpx.Response(200, text=sub_sitemap_08)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VietnamVNSource(), date_from=date(2026, 7, 8), date_to=date(2026, 7, 8),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://www.vietnam.vn/bai-viet-ngay-08"]
+    assert "https://www.vietnam.vn/sitemap/sitemap-post/2026-07-05.xml" not in requested
+    assert failed_locs == []
+
+
+def test_vietnamvn_skips_non_post_sub_sitemaps_when_domain_has_pattern():
+    # sitemap-page/author/organization/category/tag/tag-N/news-sitemap không khớp
+    # pattern "sitemap-post/YYYY-MM-DD.xml" → bị bỏ qua hoàn toàn, KHÔNG fetch (verify thật
+    # 2026-07-08: đây là trang tĩnh/tác giả/tổ chức/danh mục/tag, không phải bài viết).
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://www.vietnam.vn/news-sitemap.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-page.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-author.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-organization.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-category.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-tag.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-tag/220001.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-post/2026-07-08.xml</loc></sitemap>
+</sitemapindex>"""
+    sub_sitemap_08 = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://www.vietnam.vn/bai-that</loc><lastmod>2026-07-08T04:04:10.339Z</lastmod></url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "sitemap-post/2026-07-08" in str(request.url):
+            return httpx.Response(200, text=sub_sitemap_08)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VietnamVNSource(), date_from=date(2026, 7, 1), date_to=date(2026, 7, 8),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://www.vietnam.vn/bai-that"]
+    assert len(requested) == 2  # /sitemap.xml (index) + đúng 1 sub-sitemap post khớp pattern
+
+
+def test_vietnamvn_fetches_multiple_days_when_range_spans_several_files():
+    # Có thêm 1 sub-sitemap NGOÀI khoảng ngày (2026-07-01) — nếu pattern "day" chưa hoạt động,
+    # domain rơi vào pattern=None (fetch-all) và sẽ fetch luôn sub-sitemap này (test FAIL đúng
+    # cách vì request không mong đợi), phân biệt rõ với hành vi fetch-all tình cờ đúng kết quả.
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-post/2026-07-01.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-post/2026-07-07.xml</loc></sitemap>
+    <sitemap><loc>https://www.vietnam.vn/sitemap/sitemap-post/2026-07-08.xml</loc></sitemap>
+</sitemapindex>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "2026-07-07" in str(request.url):
+            return httpx.Response(
+                200,
+                text='<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                '<url><loc>https://www.vietnam.vn/bai-07</loc><lastmod>2026-07-07T10:00:00Z</lastmod></url>'
+                "</urlset>",
+            )
+        if "2026-07-08" in str(request.url):
+            return httpx.Response(
+                200,
+                text='<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+                '<url><loc>https://www.vietnam.vn/bai-08</loc><lastmod>2026-07-08T10:00:00Z</lastmod></url>'
+                "</urlset>",
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VietnamVNSource(), date_from=date(2026, 7, 7), date_to=date(2026, 7, 8),
+        client=client, delay_seconds=0,
+    )
+
+    assert sorted(item["url"] for item in result) == ["https://www.vietnam.vn/bai-07", "https://www.vietnam.vn/bai-08"]
+    assert "https://www.vietnam.vn/sitemap/sitemap-post/2026-07-01.xml" not in requested

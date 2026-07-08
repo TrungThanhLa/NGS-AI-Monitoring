@@ -35,6 +35,11 @@ _SITEMAP_DATE_PATTERNS: dict[str, re.Pattern] = {
     "cand.vn": re.compile(
         r"news-(?P<year>\d{4})-(?P<month>\d{1,2})\.xml$"
     ),
+    # VD: https://www.vietnam.vn/sitemap/sitemap-post/2026-07-08.xml (verified 2026-07-08) —
+    # chia đúng 1 ngày/file, khác VTV (khoảng ngày)/VOV,VN+,CAND (cả tháng).
+    "vietnam.vn": re.compile(
+        r"sitemap-post/(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\.xml$"
+    ),
 }
 
 
@@ -60,6 +65,10 @@ def _sub_sitemap_date_range(loc: str, pattern: re.Pattern | None) -> tuple[date,
 
     if groups.get("day_start") is not None:
         return date(year, month, int(groups["day_start"])), date(year, month, int(groups["day_end"]))
+
+    if groups.get("day") is not None:
+        exact_day = date(year, month, int(groups["day"]))
+        return exact_day, exact_day
 
     day_end = calendar.monthrange(year, month)[1]
     return date(year, month, 1), date(year, month, day_end)
