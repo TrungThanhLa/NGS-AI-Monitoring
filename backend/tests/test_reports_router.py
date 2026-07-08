@@ -150,6 +150,7 @@ def test_articles_returns_list_with_durations(app_client, db_session):
             confidence=0.9,
             prompt_version=1,
             analysis_duration_seconds=67.0,
+            ai_model="qwen3:8b",
         )
     )
     db_session.commit()

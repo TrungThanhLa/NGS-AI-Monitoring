@@ -159,6 +159,7 @@ def _analyze_articles(db, job: Job) -> None:
                 summary=result.get("summary"),
                 prompt_version=result["prompt_version"],
                 analysis_duration_seconds=result.get("analysis_duration_seconds"),
+                ai_model=os.environ.get("OLLAMA_MODEL", "qwen3:8b"),
             )
         )
         article.status = "analyzed"

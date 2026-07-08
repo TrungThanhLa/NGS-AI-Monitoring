@@ -33,6 +33,7 @@ def test_aggregates_sentiment_and_emotion_counts_and_lists_articles(db_session):
                 emotion="Fear",
                 confidence=0.9,
                 prompt_version=1,
+                ai_model="qwen3:8b",
             ),
             ArticleAnalysis(
                 article_id=article2.article_id,
@@ -42,6 +43,7 @@ def test_aggregates_sentiment_and_emotion_counts_and_lists_articles(db_session):
                 emotion="Trust",
                 confidence=0.95,
                 prompt_version=1,
+                ai_model="qwen3:8b",
             ),
         ]
     )
