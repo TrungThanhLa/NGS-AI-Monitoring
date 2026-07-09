@@ -30,7 +30,7 @@ def get_url_hash(url: str) -> str:
 ```
 
 **Quy tắc:**
-- Dedup bằng `SHA256(url)` trước khi insert vào bảng `articles` (cột `url_hash` có `UNIQUE` constraint)
+- Dedup bằng `SHA256(url)` **trong phạm vi 1 job** trước khi insert vào bảng `articles` — không dedup xuyên job: mỗi job crawl/phân tích lại từ đầu dù trùng URL với job khác (kể cả job đã thành công), để không bỏ lỡ nội dung đã thay đổi và không tạo dữ liệu "mồ côi" khi job cũ fail/cancel giữa chừng (2026-07-09). Chống trùng bằng 2 lớp: `set()` Python cục bộ trong 1 lần chạy job (nhanh, không đụng DB) + `UNIQUE` composite `(job_id, url_hash)` ở DB làm lưới an toàn dự phòng
 - Delay 1–2 giây giữa các request đến cùng một domain — tránh bị block
 - Website dùng JavaScript render (JS-heavy) → dùng Playwright thay cho httpx
 - Cấu hình CSS selector riêng theo từng nguồn lưu ở cột `sources.parsing_rules` (JSONB), dạng `{title, content, date, author}`

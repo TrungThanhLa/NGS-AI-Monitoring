@@ -95,6 +95,13 @@ async def analyze_article(title: str, content: str) -> dict:
 - AI trả về JSON không hợp lệ → parse với try/except, retry 1 lần, nếu vẫn lỗi thì skip bài đó
 - Nội dung dài hơn `AI_MAX_CONTENT_LENGTH` → cắt tại ranh giới câu gần nhất (`.`, `!`, `?`, xuống dòng), không cắt giữa câu/từ (`_truncate_at_sentence_boundary` trong `backend/ai/ollama_client.py`)
 
+**Giới hạn đã biết — kết quả AI không đảm bảo giống hệt nhau giữa các lần gọi (2026-07-09):**
+Sau khi bỏ dedup xuyên job (xem [06 · Crawler Strategy](06-crawler-strategy.md)), cùng 1 bài
+viết có thể được phân tích AI nhiều lần ở các job khác nhau (job trùng phạm vi ngày). Do
+`qwen3:8b` qua Ollama không set `temperature`/seed cố định, output giữa các lần gọi **không
+đảm bảo giống hệt nhau** (`topics`/`sentiment`/`emotion`/`confidence` có thể khác nhau cho
+cùng 1 bài). Đây là đánh đổi đã biết, chưa xử lý — xem "Vấn đề cần làm rõ" ở CLAUDE.md.
+
 ---
 
 ## Môi trường & Cấu hình

@@ -51,7 +51,12 @@ CREATE TABLE articles (
     job_id                UUID REFERENCES jobs(job_id),
     source_id             UUID REFERENCES sources(source_id),
     url                   TEXT NOT NULL,
-    url_hash              VARCHAR(64) UNIQUE NOT NULL,  -- SHA256(url) — dùng để dedup
+    url_hash              VARCHAR(64) NOT NULL,         -- SHA256(url), UNIQUE composite
+                                                          -- cùng job_id (KHÔNG unique riêng
+                                                          -- lẻ) — mỗi job crawl/phân tích
+                                                          -- độc lập, cùng URL có thể xuất
+                                                          -- hiện ở nhiều job, nhưng 1 job
+                                                          -- không được trùng URL với chính nó
     title                 TEXT,                         -- NULL nếu status=error (crawl lỗi,
                                                           -- không lấy được title)
     content_raw           TEXT,                         -- Nội dung đã strip HTML

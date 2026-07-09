@@ -18,7 +18,7 @@ Admin cấu hình nguồn (ngoài luồng chính — làm 1 lần)
          Sitemap XML (primary) → lọc URL theo ngày
          Listing page (fallback nếu không có sitemap)
          httpx tải HTML → BeautifulSoup parse
-         Dedup SHA256(url) → insert bảng articles
+         Dedup SHA256(url) trong phạm vi 1 job (không xuyên job) → insert bảng articles
          ↓
 [Bước 5] AI pipeline (per article):
          Ollama API → qwen3:8b
