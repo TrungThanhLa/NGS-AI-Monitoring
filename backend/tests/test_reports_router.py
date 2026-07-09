@@ -276,3 +276,67 @@ def test_cancel_skips_revoke_when_celery_task_id_is_none(app_client, db_session)
     finally:
         db_session.delete(job)
         db_session.commit()
+
+
+def test_create_logs_warning_when_overlaps_completed_job_same_source(app_client, active_source, db_session, caplog):
+    existing_job = Job(
+        source_ids=[active_source.source_id],
+        date_from=date(2026, 6, 1),
+        date_to=date(2026, 6, 30),
+        status="completed",
+    )
+    db_session.add(existing_job)
+    db_session.commit()
+
+    try:
+        with patch("backend.routers.reports.run_report_job"):
+            with caplog.at_level("WARNING"):
+                response = app_client.post(
+                    "/api/reports/create",
+                    json={
+                        "source_ids": [str(active_source.source_id)],
+                        "date_from": "2026-06-15",
+                        "date_to": "2026-07-15",
+                    },
+                )
+
+        assert response.status_code == 200
+        assert "trùng phạm vi" in caplog.text
+
+        new_job_id = response.json()["job_id"]
+        db_session.query(Job).filter_by(job_id=new_job_id).delete()
+    finally:
+        db_session.delete(existing_job)
+        db_session.commit()
+
+
+def test_create_does_not_log_warning_when_no_overlap(app_client, active_source, db_session, caplog):
+    existing_job = Job(
+        source_ids=[active_source.source_id],
+        date_from=date(2026, 1, 1),
+        date_to=date(2026, 1, 31),
+        status="completed",
+    )
+    db_session.add(existing_job)
+    db_session.commit()
+
+    try:
+        with patch("backend.routers.reports.run_report_job"):
+            with caplog.at_level("WARNING"):
+                response = app_client.post(
+                    "/api/reports/create",
+                    json={
+                        "source_ids": [str(active_source.source_id)],
+                        "date_from": "2026-06-01",
+                        "date_to": "2026-06-30",
+                    },
+                )
+
+        assert response.status_code == 200
+        assert "trùng phạm vi" not in caplog.text
+
+        new_job_id = response.json()["job_id"]
+        db_session.query(Job).filter_by(job_id=new_job_id).delete()
+    finally:
+        db_session.delete(existing_job)
+        db_session.commit()

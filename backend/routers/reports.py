@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date
 from uuid import UUID
@@ -11,6 +12,8 @@ from backend.db import get_db
 from backend.models import Article, ArticleAnalysis, Job, Source
 from backend.workers.celery_app import celery_app
 from backend.workers.report_job import run_report_job
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -31,6 +34,26 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Có source_id không tồn tại")
     if any(not source.is_active for source in sources):
         raise HTTPException(status_code=400, detail="Có nguồn không active")
+
+    # Cảnh báo (không chặn) nếu job mới trùng phạm vi ngày + nguồn với job đã completed
+    # trước đó — sau khi bỏ dedup xuyên job (migration 0009), trường hợp này sẽ crawl +
+    # phân tích AI lại TOÀN BỘ từ đầu, tốn thời gian đáng kể (AI CPU-only ~90s/bài).
+    overlapping_completed_jobs = (
+        db.query(Job)
+        .filter(
+            Job.status == "completed",
+            Job.date_from <= payload.date_to,
+            Job.date_to >= payload.date_from,
+            Job.source_ids.overlap(payload.source_ids),
+        )
+        .count()
+    )
+    if overlapping_completed_jobs > 0:
+        logger.warning(
+            "Job mới trùng phạm vi ngày/nguồn với %d job đã completed trước đó — "
+            "sẽ crawl + phân tích AI lại toàn bộ, không dùng lại kết quả cũ",
+            overlapping_completed_jobs,
+        )
 
     task_id = str(uuid.uuid4())
     job = Job(
