@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import patch
 
 import httpx
 
@@ -250,3 +251,15 @@ def test_resolves_relative_href_against_listing_page_url():
     # href tương đối "/bai-viet/..." phải được urljoin với listing_url thành URL tuyệt đối
     assert [item["url"] for item in result] == ["https://bocongan.gov.vn/bai-viet/bai-trong-khoang"]
     assert failed == []
+
+
+def test_creates_default_client_with_follow_redirects_enabled():
+    # Cùng bug với article.py (2026-07-09): httpx mặc định không tự theo redirect — nếu
+    # trang danh sách bị 301 sang URL khác, response rỗng sẽ bị hiểu nhầm thành "không có bài".
+    with patch("backend.crawler.listing.httpx.Client") as mock_client_cls:
+        mock_client_cls.return_value.get.return_value = httpx.Response(200, text="<html></html>")
+
+        get_listing_urls(FakeListingSource(), date_from=date(2026, 1, 1), date_to=date(2026, 12, 31))
+
+    _, kwargs = mock_client_cls.call_args
+    assert kwargs.get("follow_redirects") is True

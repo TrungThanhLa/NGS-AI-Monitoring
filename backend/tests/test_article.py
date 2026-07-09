@@ -1,5 +1,6 @@
 import hashlib
 from pathlib import Path
+from unittest.mock import patch
 
 import httpx
 
@@ -67,3 +68,17 @@ def test_returns_crawl_duration_seconds_excluding_outer_sleep():
 
     assert result["crawl_duration_seconds"] > 0
     assert result["crawl_duration_seconds"] < 1.0
+
+
+def test_creates_default_client_with_follow_redirects_enabled():
+    # Bug thật (2026-07-09): VTV trả 301 sang subdomain khác (worldcup.vtv.vn) cho 1 số bài —
+    # httpx mặc định KHÔNG tự theo redirect, khiến response là trang redirect trống, không tìm
+    # thấy title/content → bị đánh dấu status="error" dù bài viết vẫn hợp lệ (verify thật qua
+    # curl trực tiếp URL đó).
+    with patch("backend.crawler.article.httpx.Client") as mock_client_cls:
+        mock_client_cls.return_value.get.return_value = httpx.Response(200, text="<html></html>")
+
+        fetch_article(ARTICLE_URL, VTV_PARSING_RULES)
+
+    _, kwargs = mock_client_cls.call_args
+    assert kwargs.get("follow_redirects") is True

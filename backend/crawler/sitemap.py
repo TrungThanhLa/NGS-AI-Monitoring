@@ -140,7 +140,9 @@ def get_article_urls(
     max_retries: int | None = None,
 ) -> tuple[list[dict], list[str]]:
     owns_client = client is None
-    client = client or httpx.Client(timeout=int(os.environ.get("CRAWLER_TIMEOUT_SECONDS", "30")))
+    client = client or httpx.Client(
+        timeout=int(os.environ.get("CRAWLER_TIMEOUT_SECONDS", "30")), follow_redirects=True
+    )
     if delay_seconds is None:
         delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     if max_retries is None:

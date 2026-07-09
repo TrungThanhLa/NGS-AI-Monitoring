@@ -30,7 +30,9 @@ def fetch_article(
     retry_backoff_seconds: float | None = None,
 ) -> dict | None:
     owns_client = client is None
-    client = client or httpx.Client(timeout=int(os.environ.get("CRAWLER_TIMEOUT_SECONDS", "30")))
+    client = client or httpx.Client(
+        timeout=int(os.environ.get("CRAWLER_TIMEOUT_SECONDS", "30")), follow_redirects=True
+    )
     if max_retries is None:
         max_retries = int(os.environ.get("CRAWLER_MAX_RETRIES", "3"))
 

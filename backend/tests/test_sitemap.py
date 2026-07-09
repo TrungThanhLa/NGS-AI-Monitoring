@@ -1,4 +1,5 @@
 from datetime import date
+from unittest.mock import patch
 
 import httpx
 
@@ -704,6 +705,19 @@ def test_returns_index_url_as_failed_loc_when_sitemap_index_returns_error_status
 
     assert result == []
     assert failed_locs == ["https://vtv.vn/sitemap.xml"]
+
+
+def test_creates_default_client_with_follow_redirects_enabled():
+    # Cùng bug với article.py/listing.py (2026-07-09): httpx mặc định không tự theo redirect —
+    # nếu sitemap.xml bị 301 sang URL khác, response rỗng sẽ bị hiểu nhầm thành "sitemap phẳng
+    # không có bài".
+    with patch("backend.crawler.sitemap.httpx.Client") as mock_client_cls:
+        mock_client_cls.return_value.get.return_value = httpx.Response(200, text="<urlset></urlset>")
+
+        get_article_urls(VTVSource(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), delay_seconds=0)
+
+    _, kwargs = mock_client_cls.call_args
+    assert kwargs.get("follow_redirects") is True
 
 
 def test_returns_index_url_as_failed_loc_when_sitemap_index_request_raises():
