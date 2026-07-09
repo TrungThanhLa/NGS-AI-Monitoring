@@ -29,12 +29,17 @@ def downgrade():
     # nhất, dùng article_id làm tie-breaker khi trùng crawled_at), xoá các dòng còn
     # lại — downgrade là thao tác hiếm khi cần, chấp nhận mất dữ liệu các bản trùng
     # cũ hơn.
+    # COALESCE về '-infinity' vì crawled_at nullable ở tầng schema — so sánh row
+    # (a.crawled_at, ...) < (b.crawled_at, ...) trực tiếp sẽ trả NULL (falsy) nếu
+    # 1 trong 2 bên NULL, khiến cả 2 dòng trùng đều "sống sót" và câu lệnh
+    # create_unique_constraint bên dưới crash vì duplicate key.
     op.execute(
         """
         DELETE FROM articles a
         USING articles b
         WHERE a.url_hash = b.url_hash
-          AND (a.crawled_at, a.article_id) < (b.crawled_at, b.article_id)
+          AND (COALESCE(a.crawled_at, '-infinity'::timestamp), a.article_id)
+            < (COALESCE(b.crawled_at, '-infinity'::timestamp), b.article_id)
         """
     )
     op.drop_index("ix_articles_url_hash", "articles")
