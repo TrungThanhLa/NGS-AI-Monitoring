@@ -40,7 +40,7 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
     # trường hợp này sẽ crawl + phân tích AI lại TOÀN BỘ từ đầu, tốn thời gian đáng kể
     # (AI CPU-only ~90s/bài); nếu job kia đang chạy, còn tranh chấp cùng 1 tiến trình
     # Ollama local, dễ đẩy cả 2 job tới AI timeout.
-    overlapping_completed_jobs = (
+    overlapping_jobs = (
         db.query(Job)
         .filter(
             Job.status.in_(["completed", "running", "pending"]),
@@ -50,11 +50,11 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
         )
         .count()
     )
-    if overlapping_completed_jobs > 0:
+    if overlapping_jobs > 0:
         logger.warning(
-            "Job mới trùng phạm vi ngày/nguồn với %d job đã completed trước đó — "
-            "sẽ crawl + phân tích AI lại toàn bộ, không dùng lại kết quả cũ",
-            overlapping_completed_jobs,
+            "Job mới trùng phạm vi ngày/nguồn với %d job đã completed/running/pending "
+            "trước đó — sẽ crawl + phân tích AI lại toàn bộ, không dùng lại kết quả cũ",
+            overlapping_jobs,
         )
 
     task_id = str(uuid.uuid4())
