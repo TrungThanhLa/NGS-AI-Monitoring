@@ -340,3 +340,35 @@ def test_create_does_not_log_warning_when_no_overlap(app_client, active_source, 
     finally:
         db_session.delete(existing_job)
         db_session.commit()
+
+
+def test_create_logs_warning_when_overlaps_running_job_same_source(app_client, active_source, db_session, caplog):
+    existing_job = Job(
+        source_ids=[active_source.source_id],
+        date_from=date(2026, 6, 1),
+        date_to=date(2026, 6, 30),
+        status="running",
+    )
+    db_session.add(existing_job)
+    db_session.commit()
+
+    try:
+        with patch("backend.routers.reports.run_report_job"):
+            with caplog.at_level("WARNING"):
+                response = app_client.post(
+                    "/api/reports/create",
+                    json={
+                        "source_ids": [str(active_source.source_id)],
+                        "date_from": "2026-06-15",
+                        "date_to": "2026-07-15",
+                    },
+                )
+
+        assert response.status_code == 200
+        assert "trùng phạm vi" in caplog.text
+
+        new_job_id = response.json()["job_id"]
+        db_session.query(Job).filter_by(job_id=new_job_id).delete()
+    finally:
+        db_session.delete(existing_job)
+        db_session.commit()

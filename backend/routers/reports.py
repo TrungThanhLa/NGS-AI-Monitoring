@@ -36,12 +36,14 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Có nguồn không active")
 
     # Cảnh báo (không chặn) nếu job mới trùng phạm vi ngày + nguồn với job đã completed
-    # trước đó — sau khi bỏ dedup xuyên job (migration 0009), trường hợp này sẽ crawl +
-    # phân tích AI lại TOÀN BỘ từ đầu, tốn thời gian đáng kể (AI CPU-only ~90s/bài).
+    # hoặc đang pending/running trước đó — sau khi bỏ dedup xuyên job (migration 0009),
+    # trường hợp này sẽ crawl + phân tích AI lại TOÀN BỘ từ đầu, tốn thời gian đáng kể
+    # (AI CPU-only ~90s/bài); nếu job kia đang chạy, còn tranh chấp cùng 1 tiến trình
+    # Ollama local, dễ đẩy cả 2 job tới AI timeout.
     overlapping_completed_jobs = (
         db.query(Job)
         .filter(
-            Job.status == "completed",
+            Job.status.in_(["completed", "running", "pending"]),
             Job.date_from <= payload.date_to,
             Job.date_to >= payload.date_from,
             Job.source_ids.overlap(payload.source_ids),
