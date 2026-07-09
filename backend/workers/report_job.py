@@ -47,6 +47,13 @@ def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
 def _crawl_sources(db, job: Job) -> None:
     delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     max_articles = _parse_max_articles(os.environ.get("MAX_ARTICLES_PER_JOB"))
+    # Chỉ chống trùng URL TRONG PHẠM VI 1 lần chạy job này (không đụng DB) — một số nguồn
+    # (VD sitemap index) có thể vô tình trả về cùng 1 URL 2 lần. KHÔNG chặn URL đã crawl ở
+    # job khác: mỗi job crawl/phân tích độc lập, kể cả trùng URL với job trước (xem spec
+    # docs/superpowers/specs/2026-07-09-remove-cross-job-dedup-design.md). UNIQUE composite
+    # (job_id, url_hash) ở DB (migration 0009) là lưới an toàn dự phòng cho trường hợp check
+    # này có bug bỏ sót — không phải cơ chế chính, không cần xử lý IntegrityError riêng ở đây.
+    seen_urls: set[str] = set()
 
     def crawled_count() -> int:
         return db.query(Article).filter_by(job_id=job.job_id).count()
@@ -63,14 +70,12 @@ def _crawl_sources(db, job: Job) -> None:
             continue
 
         for loc in failed_locs:
-            # Hash theo job_id+url (không phải SHA256(url) như bài viết) vì url_hash UNIQUE
-            # toàn cục — cùng 1 sub-sitemap/listing-page có thể lỗi lại ở job khác, nguồn khác
             db.add(
                 Article(
                     job_id=job.job_id,
                     source_id=source.source_id,
                     url=loc,
-                    url_hash=compute_url_hash(f"{job.job_id}:{loc}"),
+                    url_hash=compute_url_hash(loc),
                     status="error",
                 )
             )
@@ -80,9 +85,10 @@ def _crawl_sources(db, job: Job) -> None:
             if max_articles is not None and crawled_count() >= max_articles:
                 break
 
-            url_hash = compute_url_hash(candidate["url"])
-            if db.query(Article).filter_by(url_hash=url_hash).first() is not None:
+            if candidate["url"] in seen_urls:
                 continue
+            seen_urls.add(candidate["url"])
+            url_hash = compute_url_hash(candidate["url"])
 
             try:
                 parsed = fetch_article_dispatch(candidate["url"], source.parsing_rules)

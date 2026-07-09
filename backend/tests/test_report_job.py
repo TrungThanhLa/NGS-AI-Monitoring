@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
+from sqlalchemy.exc import IntegrityError
 
+from backend.crawler.article import compute_url_hash
 from backend.models import Article, ArticleAnalysis, Job, Source
 from backend.workers.report_job import _analyze_articles, _crawl_sources
 
@@ -638,6 +640,140 @@ def test_crawl_sources_prefers_parsed_published_at_over_listing_lastmod(db_sessi
         # published_at thật từ bài viết phải được ưu tiên hơn lastmod của trang danh sách
         assert article.published_at == datetime(2026, 6, 20, 8, 0)
     finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_recrawls_url_already_belonging_to_another_job(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job_a = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job_a)
+    db_session.flush()
+
+    shared_url = "https://example.test/bai-da-crawl-truoc"
+    existing_article = Article(
+        job_id=job_a.job_id,
+        source_id=source.source_id,
+        url=shared_url,
+        url_hash=compute_url_hash(shared_url),
+        title="Bài cũ",
+        content_raw="Nội dung cũ",
+        status="analyzed",
+    )
+    db_session.add(existing_article)
+    db_session.commit()
+
+    job_b = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job_b)
+    db_session.flush()
+
+    candidates = [{"url": shared_url, "lastmod": date(2026, 6, 1)}]
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url,
+            "url_hash": compute_url_hash(url),
+            "title": "Bài mới (đã crawl lại)",
+            "content_raw": "Nội dung mới",
+            "author": None,
+            "published_at": None,
+            "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job_b)
+
+        job_b_articles = db_session.query(Article).filter_by(job_id=job_b.job_id).all()
+        assert len(job_b_articles) == 1
+        assert job_b_articles[0].url == shared_url
+        assert job_b_articles[0].title == "Bài mới (đã crawl lại)"
+    finally:
+        db_session.query(Article).filter_by(job_id=job_b.job_id).delete()
+        db_session.query(Article).filter_by(job_id=job_a.job_id).delete()
+        db_session.delete(job_b)
+        db_session.delete(job_a)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_dedups_within_same_job_when_candidates_repeat_url(db_session, monkeypatch):
+    monkeypatch.delenv("MAX_ARTICLES_PER_JOB", raising=False)
+
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    repeated_url = "https://example.test/bai-lap-lai"
+    candidates = [
+        {"url": repeated_url, "lastmod": date(2026, 6, 1)},
+        {"url": repeated_url, "lastmod": date(2026, 6, 1)},
+    ]
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url,
+            "url_hash": compute_url_hash(url),
+            "title": "Title",
+            "content_raw": "Content",
+            "author": None,
+            "published_at": None,
+            "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", return_value=(candidates, [])), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        count = db_session.query(Article).filter_by(job_id=job.job_id).count()
+        assert count == 1
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_composite_unique_constraint_blocks_duplicate_within_same_job_at_db_level(db_session):
+    """Lưới an toàn dự phòng ở tầng DB — kể cả khi seen_urls (Python) có bug bỏ sót,
+    UNIQUE composite (job_id, url_hash) vẫn phải chặn insert trùng trong CÙNG 1 job."""
+    source = Source(name="Test", domain=f"test-{uuid.uuid4()}.example", group_name="Test", parsing_rules={})
+    db_session.add(source)
+    db_session.flush()
+
+    job = Job(source_ids=[source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    db_session.add(job)
+    db_session.flush()
+
+    url = "https://example.test/bai-trung-trong-cung-job"
+    db_session.add(
+        Article(job_id=job.job_id, source_id=source.source_id, url=url, url_hash=compute_url_hash(url))
+    )
+    db_session.commit()
+
+    try:
+        with pytest.raises(IntegrityError):
+            db_session.add(
+                Article(job_id=job.job_id, source_id=source.source_id, url=url, url_hash=compute_url_hash(url))
+            )
+            db_session.commit()
+    finally:
+        db_session.rollback()
         db_session.query(Article).filter_by(job_id=job.job_id).delete()
         db_session.delete(job)
         db_session.delete(source)
