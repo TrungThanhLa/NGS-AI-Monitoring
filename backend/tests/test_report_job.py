@@ -8,7 +8,23 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.crawler.article import compute_url_hash
 from backend.models import Article, ArticleAnalysis, Job, Source
-from backend.workers.report_job import _analyze_articles, _crawl_sources
+from backend.workers.report_job import _analyze_articles, _crawl_sources, _distribute_evenly
+
+
+def test_distribute_evenly_splits_remainder_to_first_sources():
+    assert _distribute_evenly(5, 3) == [2, 2, 1]
+
+
+def test_distribute_evenly_splits_exactly_when_divisible():
+    assert _distribute_evenly(6, 3) == [2, 2, 2]
+
+
+def test_distribute_evenly_allows_zero_quota_when_fewer_articles_than_sources():
+    assert _distribute_evenly(2, 5) == [1, 1, 0, 0, 0]
+
+
+def test_distribute_evenly_single_source_gets_everything():
+    assert _distribute_evenly(7, 1) == [7]
 
 
 def test_crawl_sources_stops_at_max_articles_per_job_limit(db_session, monkeypatch):
@@ -777,4 +793,158 @@ def test_composite_unique_constraint_blocks_duplicate_within_same_job_at_db_leve
         db_session.query(Article).filter_by(job_id=job.job_id).delete()
         db_session.delete(job)
         db_session.delete(source)
+        db_session.commit()
+
+
+def test_crawl_sources_distributes_evenly_across_sources_when_flag_enabled(db_session, monkeypatch):
+    monkeypatch.setenv("MAX_ARTICLES_PER_JOB", "5")
+    monkeypatch.setenv("EVEN_DISTRIBUTE_ACROSS_SOURCES", "true")
+
+    source_a = Source(name="A", domain=f"a-{uuid.uuid4()}.example", group_name="A", parsing_rules={})
+    source_b = Source(name="B", domain=f"b-{uuid.uuid4()}.example", group_name="B", parsing_rules={})
+    source_c = Source(name="C", domain=f"c-{uuid.uuid4()}.example", group_name="C", parsing_rules={})
+    db_session.add_all([source_a, source_b, source_c])
+    db_session.flush()
+
+    job = Job(
+        source_ids=[source_a.source_id, source_b.source_id, source_c.source_id],
+        date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+    )
+    db_session.add(job)
+    db_session.flush()
+
+    # Mỗi nguồn có dư candidate (4 mỗi nguồn) để đảm bảo quota là yếu tố giới hạn, không
+    # phải do thiếu candidate.
+    def fake_get_article_urls(source, date_from, date_to):
+        return (
+            [{"url": f"https://{source.domain}/a-{i}", "lastmod": date(2026, 6, 1)} for i in range(4)],
+            [],
+        )
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url, "url_hash": f"hash-{url}", "title": "Title", "content_raw": "Content",
+            "author": None, "published_at": None, "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", side_effect=fake_get_article_urls), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        count_a = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_a.source_id).count()
+        count_b = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_b.source_id).count()
+        count_c = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_c.source_id).count()
+        assert (count_a, count_b, count_c) == (2, 2, 1)
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source_a)
+        db_session.delete(source_b)
+        db_session.delete(source_c)
+        db_session.commit()
+
+
+def test_crawl_sources_does_not_compensate_shortfall_from_other_sources(db_session, monkeypatch):
+    monkeypatch.setenv("MAX_ARTICLES_PER_JOB", "5")
+    monkeypatch.setenv("EVEN_DISTRIBUTE_ACROSS_SOURCES", "true")
+
+    source_a = Source(name="A", domain=f"a-{uuid.uuid4()}.example", group_name="A", parsing_rules={})
+    source_b = Source(name="B", domain=f"b-{uuid.uuid4()}.example", group_name="B", parsing_rules={})
+    source_c = Source(name="C", domain=f"c-{uuid.uuid4()}.example", group_name="C", parsing_rules={})
+    db_session.add_all([source_a, source_b, source_c])
+    db_session.flush()
+
+    job = Job(
+        source_ids=[source_a.source_id, source_b.source_id, source_c.source_id],
+        date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+    )
+    db_session.add(job)
+    db_session.flush()
+
+    # Quota tính được là [2, 2, 1] cho A/B/C. Nguồn A chỉ có 1 candidate (thiếu 1 so với quota).
+    def fake_get_article_urls(source, date_from, date_to):
+        if source.source_id == source_a.source_id:
+            return ([{"url": f"https://{source.domain}/x", "lastmod": date(2026, 6, 1)}], [])
+        return (
+            [{"url": f"https://{source.domain}/a-{i}", "lastmod": date(2026, 6, 1)} for i in range(4)],
+            [],
+        )
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url, "url_hash": f"hash-{url}", "title": "Title", "content_raw": "Content",
+            "author": None, "published_at": None, "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", side_effect=fake_get_article_urls), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        count_a = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_a.source_id).count()
+        count_b = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_b.source_id).count()
+        count_c = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_c.source_id).count()
+        total = db_session.query(Article).filter_by(job_id=job.job_id).count()
+
+        assert count_a == 1  # thiếu hụt, không bù
+        assert count_b == 2  # vẫn đúng quota của B, không nhận thêm phần thiếu của A
+        assert count_c == 1
+        assert total == 4  # ít hơn MAX_ARTICLES_PER_JOB=5 — đánh đổi đã chốt trong spec
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source_a)
+        db_session.delete(source_b)
+        db_session.delete(source_c)
+        db_session.commit()
+
+
+def test_crawl_sources_does_not_distribute_when_flag_disabled(db_session, monkeypatch):
+    monkeypatch.setenv("MAX_ARTICLES_PER_JOB", "5")
+    monkeypatch.delenv("EVEN_DISTRIBUTE_ACROSS_SOURCES", raising=False)
+
+    source_a = Source(name="A", domain=f"a-{uuid.uuid4()}.example", group_name="A", parsing_rules={})
+    source_b = Source(name="B", domain=f"b-{uuid.uuid4()}.example", group_name="B", parsing_rules={})
+    db_session.add_all([source_a, source_b])
+    db_session.flush()
+
+    job = Job(
+        source_ids=[source_a.source_id, source_b.source_id],
+        date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+    )
+    db_session.add(job)
+    db_session.flush()
+
+    def fake_get_article_urls(source, date_from, date_to):
+        return (
+            [{"url": f"https://{source.domain}/a-{i}", "lastmod": date(2026, 6, 1)} for i in range(10)],
+            [],
+        )
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url, "url_hash": f"hash-{url}", "title": "Title", "content_raw": "Content",
+            "author": None, "published_at": None, "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", side_effect=fake_get_article_urls), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        count_a = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_a.source_id).count()
+        count_b = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_b.source_id).count()
+
+        # Hành vi cũ (cờ tắt/mặc định): nguồn A (đầu tiên) ăn hết ngân sách, nguồn B không có bài nào
+        assert count_a == 5
+        assert count_b == 0
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source_a)
+        db_session.delete(source_b)
         db_session.commit()

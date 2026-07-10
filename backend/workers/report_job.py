@@ -44,9 +44,24 @@ def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
     return get_article_urls(source, date_from, date_to)
 
 
+def _distribute_evenly(total: int, n: int) -> list[int]:
+    # Chia total thành n phần gần bằng nhau nhất, số dư dồn cho các phần tử ĐẦU tiên theo
+    # thứ tự — khớp thứ tự source_ids user đã chọn ở FE. VD total=5, n=3 → [2, 2, 1].
+    base, remainder = divmod(total, n)
+    return [base + 1 if i < remainder else base for i in range(n)]
+
+
 def _crawl_sources(db, job: Job) -> None:
     delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     max_articles = _parse_max_articles(os.environ.get("MAX_ARTICLES_PER_JOB"))
+    even_distribute = os.environ.get("EVEN_DISTRIBUTE_ACROSS_SOURCES", "false").lower() == "true"
+    # Chia đều max_articles cho từng nguồn đã chọn (đúng thứ tự job.source_ids) — chỉ áp
+    # dụng khi bật cờ VÀ có giới hạn tổng (max_articles=None nghĩa là không giới hạn, chia
+    # đều một giá trị vô hạn không có ý nghĩa). None = giữ nguyên hành vi cũ, chỉ check tổng job.
+    per_source_quota: list[int] | None = None
+    if even_distribute and max_articles is not None and job.source_ids:
+        per_source_quota = _distribute_evenly(max_articles, len(job.source_ids))
+
     # Chỉ chống trùng URL TRONG PHẠM VI 1 lần chạy job này (không đụng DB) — một số nguồn
     # (VD sitemap index) có thể vô tình trả về cùng 1 URL 2 lần. KHÔNG chặn URL đã crawl ở
     # job khác: mỗi job crawl/phân tích độc lập, kể cả trùng URL với job trước (xem spec
@@ -58,7 +73,10 @@ def _crawl_sources(db, job: Job) -> None:
     def crawled_count() -> int:
         return db.query(Article).filter_by(job_id=job.job_id).count()
 
-    for source_id in job.source_ids:
+    def source_crawled_count(source_id) -> int:
+        return db.query(Article).filter_by(job_id=job.job_id, source_id=source_id).count()
+
+    for idx, source_id in enumerate(job.source_ids):
         if max_articles is not None and crawled_count() >= max_articles:
             break
 
@@ -83,6 +101,8 @@ def _crawl_sources(db, job: Job) -> None:
 
         for candidate in candidates:
             if max_articles is not None and crawled_count() >= max_articles:
+                break
+            if per_source_quota is not None and source_crawled_count(source.source_id) >= per_source_quota[idx]:
                 break
 
             if candidate["url"] in seen_urls:
