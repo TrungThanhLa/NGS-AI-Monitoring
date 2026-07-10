@@ -71,7 +71,6 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 ### Bước tiếp theo
 1. Chạy lại job thật cho bocongan.gov.vn khi mạng không còn bị Incapsula WAF chặn (thử lại sau vài giờ/vài ngày, hoặc từ mạng khác) — code + migration đã sẵn sàng, chỉ còn thiếu bước verify bằng dữ liệu thật
 2. Bắt đầu Slice 4 (Report đầy đủ: aggregate GROUP BY nguồn/chủ đề/tháng/sentiment/emotion + build DOCX template đầy đủ theo `sample_report_form.docx`)
-3. Theo dõi giá trị `emotion` ngoài enum (`"Neutral"`, phát hiện Slice 3) — nếu lặp lại, cân nhắc validate hoặc tinh chỉnh prompt
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
@@ -91,7 +90,6 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 - **Kết quả AI không đảm bảo giống hệt nhau giữa các lần phân tích cùng 1 bài (phát hiện khi review plan bỏ dedup xuyên job, 2026-07-09):** `qwen3:8b` qua Ollama không set `temperature`/seed cố định — nếu 2 job trùng phạm vi ngày cùng phân tích 1 bài, `topics`/`sentiment`/`emotion`/`confidence` có thể khác nhau giữa 2 lần. Chưa xử lý (chưa set temperature/seed, chưa có cảnh báo trong report) — theo dõi thêm khi có dữ liệu thật từ nhiều job trùng phạm vi, cân nhắc set `temperature=0` nếu Ollama/`qwen3:8b` hỗ trợ. Xem [07 · AI Pipeline](.claude/rules/07-ai-pipeline.md)
 - **Theo dõi kích thước bảng `articles` sau khi bỏ dedup xuyên job (2026-07-09):** mỗi job trùng phạm vi ngày với job trước sẽ thêm 1 bộ dòng mới (không tái sử dụng dòng cũ) — bảng phình to không giới hạn theo thời gian nếu user tạo report định kỳ trùng lịch. Chưa có ngưỡng cảnh báo hay kế hoạch dọn dẹp cụ thể — định kỳ kiểm tra `SELECT count(*) FROM articles`, nếu vượt mốc ước tính (VD >100,000 dòng) thì lên kế hoạch 1 slice archival/cleanup (ngoài phạm vi hiện tại)
 - **Số nguồn Slice 2 hiện đạt 7 (không phải ước tính gốc 8–10; theo `content_survey.docx` con số thực tế nên là ~11–12, khớp pilot test 11/40 — chưa sửa số trong roadmap)** — đã xác nhận 7 nguồn crawl được thật (VTV+VOV+VietnamPlus+CAND+BoCongAn+TinGia+Vietnam.vn, thêm Vietnam.vn 2026-07-08 sau khi Slice 2 "hoàn thành" ban đầu ở mức 6); qdnd.vn bị loại do lỗi redirect-loop chưa rõ nguyên nhân (xem bảng quyết định); chinhphu.vn/mod.gov.vn/bvhttdl.gov.vn không có bài chuyên tin giả theo khảo sát thật — người dùng đã xác nhận 6 nguồn là đủ cho slice này trước đó, Vietnam.vn là bổ sung thêm theo yêu cầu mới, không ép đủ số 8–10
-- **Hằng số `ESTIMATED_SECONDS_PER_ARTICLE = 90` ở `SummaryCard.tsx`** là ước lượng thô, chưa có benchmark thật trên nhiều nguồn — cần điều chỉnh lại khi Slice 3 có dữ liệu benchmark thật trên ≥50 bài
 
 ## Roadmap — Vertical Slices
 
