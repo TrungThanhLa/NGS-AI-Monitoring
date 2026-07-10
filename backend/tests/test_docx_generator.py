@@ -67,6 +67,15 @@ def test_generate_docx_includes_new_aggregate_tables(tmp_path):
     generate_docx(_fake_job(), AGGREGATES, str(output_path))
 
     doc = docx.Document(str(output_path))
+    # Khóa chặt số lượng bảng (7 bảng aggregate + 1 bảng danh sách bài viết) — nếu ai đó
+    # un-merge Bảng 3.2/3.7 (quyết định gộp có chủ đích) thành 2 bảng riêng, số này sẽ
+    # tăng lên 9 và test fail
+    assert len(doc.tables) == 8
+    # Khóa chặt quyết định "không dùng chart/ảnh" (chỉ bảng) — nếu ai đó thêm
+    # doc.add_picture(...) cho chart, inline_shapes sẽ không còn rỗng và test fail
+    # (so sánh bằng len() vì InlineShapes là collection object của python-docx,
+    # không phải list thuần nên không so sánh == [] được)
+    assert len(doc.inline_shapes) == 0
     full_text = "\n".join(p.text for p in doc.paragraphs)
     table_text = "\n".join(cell.text for table in doc.tables for row in table.rows for cell in row.cells)
     combined = full_text + "\n" + table_text
