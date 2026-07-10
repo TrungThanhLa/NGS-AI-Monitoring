@@ -153,3 +153,45 @@ def test_analyze_articles_batch_returns_empty_list_for_no_articles():
     results = asyncio.run(analyze_articles_batch([], concurrency=1))
 
     assert results == []
+
+
+def test_sets_emotion_none_and_needs_review_when_emotion_outside_enum():
+    invalid_emotion_json = VALID_JSON.replace('"emotion": "Fear"', '"emotion": "Neutral"')
+    client = _client_with_responses([invalid_emotion_json])
+
+    result = asyncio.run(analyze_article("Tiêu đề", "Nội dung bài viết", client=client))
+
+    assert result["emotion"] is None
+    assert result["needs_review"] is True
+    # Các field khác vẫn giữ nguyên — không vứt bỏ cả bài chỉ vì 1 field sai enum
+    assert result["sentiment"] == "negative"
+    assert result["topics"] == ["Tin giả và thông tin sai lệch"]
+
+
+def test_keeps_needs_review_true_when_both_low_confidence_and_invalid_emotion():
+    bad = VALID_JSON.replace('"emotion": "Fear"', '"emotion": "Neutral"').replace(
+        '"confidence": 0.85', '"confidence": 0.3'
+    )
+    client = _client_with_responses([bad])
+
+    result = asyncio.run(analyze_article("Tiêu đề", "Nội dung bài viết", client=client))
+
+    assert result["emotion"] is None
+    assert result["needs_review"] is True
+
+
+def test_does_not_retry_ai_call_when_only_emotion_is_invalid():
+    # Chỉ 1 lần gọi trong danh sách response — nếu code lỡ retry sẽ IndexError
+    # (MockTransport handler dùng min(i, len-1) nên thực ra không crash, thay vào đó
+    # đếm số lần gọi thật để khẳng định không có lệnh gọi thứ 2)
+    call_count = {"i": 0}
+
+    async def handler(request):
+        call_count["i"] += 1
+        return httpx.Response(200, json={"response": VALID_JSON.replace('"emotion": "Fear"', '"emotion": "Neutral"')})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+    asyncio.run(analyze_article("Tiêu đề", "Nội dung bài viết", client=client))
+
+    assert call_count["i"] == 1

@@ -1,12 +1,15 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import time
 
 import httpx
 
-from backend.ai.prompts.v1 import CLASSIFICATION_PROMPT, PROMPT_VERSION, TOPIC_GROUPS
+from backend.ai.prompts.v1 import CLASSIFICATION_PROMPT, EMOTION_GROUPS, PROMPT_VERSION, TOPIC_GROUPS
+
+logger = logging.getLogger(__name__)
 
 JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 
@@ -60,6 +63,15 @@ async def analyze_article(title: str, content: str, client: httpx.AsyncClient | 
             raise ValueError("Ollama trả về JSON không hợp lệ sau khi retry") from last_error
 
         result["needs_review"] = result.get("confidence", 1.0) < confidence_threshold
+        if result.get("emotion") not in EMOTION_GROUPS:
+            logger.warning(
+                "AI trả về emotion ngoài enum chuẩn %s: %r (tiêu đề bài: %r) — set emotion=None, needs_review=True",
+                EMOTION_GROUPS,
+                result.get("emotion"),
+                title,
+            )
+            result["emotion"] = None
+            result["needs_review"] = True
         result["prompt_version"] = PROMPT_VERSION
         result["ai_model"] = os.environ["OLLAMA_MODEL"]
         result["analysis_duration_seconds"] = time.perf_counter() - start
