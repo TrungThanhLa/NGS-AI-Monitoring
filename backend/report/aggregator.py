@@ -27,6 +27,13 @@ def aggregate_basic(db: Session, job_id: UUID) -> dict:
     monthly_counts: Counter = Counter()
     needs_review_count = 0
 
+    # Lưu ý các hành vi không hiển nhiên khi gộp số liệu:
+    # - topic_counts đếm theo TỪNG chủ đề của TỪNG bài (multi-label) — 1 bài thuộc nhiều chủ đề
+    #   thì cộng dồn vào nhiều topic, không phải đếm 1 bài = 1 chủ đề duy nhất
+    # - source_counts nhóm theo source.group_name (cơ quan chủ quản), KHÔNG phải source.name
+    #   (kênh cụ thể) — cố ý, để 2 báo khác nhau cùng 1 bộ/cơ quan tính chung 1 bucket
+    # - monthly_counts bỏ qua âm thầm bài có published_at = None (không phải lỗi, chỉ đơn giản
+    #   là không tính được vào tháng nào)
     for article, analysis, source in rows:
         sentiment_counts[analysis.sentiment] += 1
         emotion_counts[analysis.emotion or UNKNOWN_EMOTION_LABEL] += 1
@@ -65,6 +72,10 @@ def aggregate_basic(db: Session, job_id: UUID) -> dict:
         "topic_counts": dict(sorted(topic_counts.items(), key=lambda kv: kv[1], reverse=True)),
         "keyword_counts": dict(sorted_keywords),
         "monthly_counts": dict(sorted(monthly_counts.items())),
+        # "Tổng số bài" = len(rows), mà rows đến từ INNER JOIN với ArticleAnalysis nên chỉ đếm
+        # bài đã phân tích AI thành công (status="analyzed") — không gồm bài status="error"
+        # (crawl lỗi, không có ArticleAnalysis). Hành vi này có từ Slice 1, không phải giới hạn
+        # mới của aggregate_basic() ở đây.
         "summary_stats": {
             "Tổng số bài": len(rows),
             "Tổng số cơ quan": len(source_counts),
