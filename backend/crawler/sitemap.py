@@ -169,6 +169,7 @@ def get_article_urls(
     client: httpx.Client | None = None,
     delay_seconds: float | None = None,
     max_retries: int | None = None,
+    today: date | None = None,
 ) -> tuple[list[dict], list[str]]:
     owns_client = client is None
     client = client or httpx.Client(
@@ -178,6 +179,8 @@ def get_article_urls(
         delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     if max_retries is None:
         max_retries = int(os.environ.get("CRAWLER_MAX_RETRIES", "3"))
+    if today is None:
+        today = date.today()
 
     sitemap_pages = source.parsing_rules.get("sitemap_pages")
     if sitemap_pages:
@@ -255,9 +258,13 @@ def get_article_urls(
                 source.domain, date_from, date_to,
             )
 
-        for always_loc in _SITEMAP_ALWAYS_INCLUDE.get(source.domain, []):
-            if always_loc not in sub_sitemap_locs:
-                sub_sitemap_locs.append(always_loc)
+        if date_to >= today:
+            # Sub-sitemap catch-all chỉ chứa bài MỚI NHẤT (gần hôm nay) — job có date_to nằm
+            # hoàn toàn trong quá khứ chắc chắn không nhận thêm được bài nào từ URL này, fetch
+            # vẫn tốn 1 request vô ích. Chỉ fetch khi phạm vi ngày còn chạm tới hôm nay trở đi.
+            for always_loc in _SITEMAP_ALWAYS_INCLUDE.get(source.domain, []):
+                if always_loc not in sub_sitemap_locs:
+                    sub_sitemap_locs.append(always_loc)
 
         results = []
         failed_locs = []

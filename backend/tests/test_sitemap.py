@@ -94,10 +94,6 @@ def make_handler():
             return httpx.Response(200, text=SITEMAP_INDEX)
         if request.url.path == "/sitemaps/sitemaps-2026-6-21-25.xml":
             return httpx.Response(200, text=SUB_SITEMAP)
-        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
-            # VTV luôn fetch kèm catch-all này (_SITEMAP_ALWAYS_INCLUDE) — không liên quan gì
-            # tới test này, trả rỗng.
-            return httpx.Response(200, text="<urlset></urlset>")
         raise AssertionError(f"unexpected request: {request.url}")
 
     return handler, requested
@@ -131,8 +127,6 @@ def test_skips_sub_sitemap_that_keeps_failing_after_retries_without_raising():
         if request.url.path == "/sitemaps/sitemaps-2026-6-21-25.xml":
             attempts["count"] += 1
             raise httpx.ConnectError("boom")
-        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
-            return httpx.Response(200, text="<urlset></urlset>")
         raise AssertionError(f"unexpected request: {request.url}")
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -248,8 +242,6 @@ def test_vtv_domain_pre_filters_by_date_range():
             return httpx.Response(200, text=index_xml)
         if "6-21-25" in str(request.url):
             return httpx.Response(200, text=sub_sitemap)
-        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
-            return httpx.Response(200, text="<urlset></urlset>")
         raise AssertionError(f"unexpected request: {request.url}")
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -766,9 +758,43 @@ def test_vtv_always_includes_latest_news_sitemap_regardless_of_date_pattern():
     client = httpx.Client(transport=httpx.MockTransport(handler))
     result, failed_locs = get_article_urls(
         VTVSource(), date_from=date(2026, 7, 6), date_to=date(2026, 7, 10),
-        client=client, delay_seconds=0,
+        client=client, delay_seconds=0, today=date(2026, 7, 10),
     )
 
     assert [item["url"] for item in result] == ["https://vtv.vn/bai-moi-nhat-chua-len-sub-sitemap"]
     assert "https://vtv.vn/latest-news-sitemap.xml" in requested
+    assert failed_locs == []
+
+
+def test_vtv_skips_latest_news_sitemap_when_date_range_entirely_in_the_past():
+    # Tối ưu 2026-07-10: latest-news-sitemap.xml chỉ chứa bài MỚI NHẤT (gần "hôm nay"), nên
+    # job có date_to nằm hoàn toàn trong quá khứ (< hôm nay) chắc chắn không thể nhận thêm
+    # bài nào từ URL này — fetch vẫn tốn 1 request vô ích. Chỉ fetch khi date_to >= hôm nay.
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://vtv.vn/sitemaps/sitemaps-2026-6-21-25.xml</loc></sitemap>
+    <sitemap><loc>https://vtv.vn/latest-news-sitemap.xml</loc></sitemap>
+</sitemapindex>"""
+    sub_sitemap = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://vtv.vn/bai-viet-ngay-22</loc><lastmod>2026-06-22T10:00:00+07:00</lastmod></url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if "6-21-25" in str(request.url):
+            return httpx.Response(200, text=sub_sitemap)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VTVSource(), date_from=date(2026, 6, 20), date_to=date(2026, 6, 24),
+        client=client, delay_seconds=0, today=date(2026, 7, 10),
+    )
+
+    assert [item["url"] for item in result] == ["https://vtv.vn/bai-viet-ngay-22"]
+    assert "https://vtv.vn/latest-news-sitemap.xml" not in requested
     assert failed_locs == []
