@@ -172,6 +172,61 @@ def test_articles_returns_list_with_durations(app_client, db_session):
         db_session.commit()
 
 
+def test_articles_returns_source_name(app_client, db_session, active_source):
+    job = Job(source_ids=[active_source.source_id], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="running")
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        source_id=active_source.source_id,
+        url="https://vtv.vn/bai-nguon",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Bài có nguồn",
+        status="pending_analysis",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    try:
+        response = app_client.get(f"/api/reports/{job.job_id}/articles")
+
+        body = response.json()["articles"]
+        assert body[0]["source_name"] == active_source.name
+    finally:
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_articles_returns_null_source_name_when_article_has_no_source(app_client, db_session):
+    # Trường hợp hiếm nhưng có thể xảy ra ở test/dữ liệu cũ — source_id không NOT NULL ở
+    # tầng DB, không nên crash khi thiếu.
+    job = Job(source_ids=[], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="running")
+    db_session.add(job)
+    db_session.flush()
+
+    article = Article(
+        job_id=job.job_id,
+        url="https://vtv.vn/bai-khong-nguon",
+        url_hash=f"hash-{uuid.uuid4()}",
+        title="Bài không nguồn",
+        status="pending_analysis",
+    )
+    db_session.add(article)
+    db_session.commit()
+
+    try:
+        response = app_client.get(f"/api/reports/{job.job_id}/articles")
+
+        body = response.json()["articles"]
+        assert body[0]["source_name"] is None
+    finally:
+        db_session.delete(article)
+        db_session.delete(job)
+        db_session.commit()
+
+
 def test_articles_shows_null_durations_when_not_yet_analyzed(app_client, db_session):
     job = Job(source_ids=[], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="running")
     db_session.add(job)

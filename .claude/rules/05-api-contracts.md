@@ -55,6 +55,7 @@ GET  /api/jobs/{job_id}              # Chi tiết job (chưa code)
       "title": "Tiêu đề bài viết",
       "url": "https://vtv.vn/...",
       "status": "analyzed",
+      "source_name": "VTV News",
       "crawl_duration_seconds": 0.24,
       "analysis_duration_seconds": 67.0,
       "total_duration_seconds": 67.24
@@ -63,6 +64,7 @@ GET  /api/jobs/{job_id}              # Chi tiết job (chưa code)
 }
 ```
 - `title` là `null` nếu `status="error"` (crawl lỗi, không lấy được title)
+- `source_name` là `null` nếu bài không gắn được nguồn (hiếm gặp, `source_id` không NOT NULL ở tầng DB) — FE hiện `"-"` khi `null` (2026-07-10, thêm cột "Nguồn" + "STT" ở bảng crawl trực tiếp)
 - `analysis_duration_seconds`/`total_duration_seconds` là `null` nếu bài chưa được AI phân tích xong
 - `total_duration_seconds` tính ngay trong response (`crawl + analysis`), không lưu DB
 

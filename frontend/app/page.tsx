@@ -34,6 +34,7 @@ type CrawledArticle = {
   title: string | null;
   url: string;
   status: string;
+  source_name: string | null;
   crawl_duration_seconds: number | null;
   analysis_duration_seconds: number | null;
   total_duration_seconds: number | null;
@@ -216,7 +217,9 @@ export default function Home() {
         <table className="mt-6 w-full text-sm border-collapse">
           <thead>
             <tr className="border-b text-left">
+              <th className="p-1">STT</th>
               <th className="p-1">Tiêu đề</th>
+              <th className="p-1">Nguồn</th>
               <th className="p-1">Trạng thái</th>
               <th className="p-1">Crawl</th>
               <th className="p-1">Phân tích</th>
@@ -224,13 +227,15 @@ export default function Home() {
             </tr>
           </thead>
           <tbody>
-            {articles.map((a) => (
+            {articles.map((a, index) => (
               <tr key={a.url} className="border-b">
+                <td className="p-1">{index + 1}</td>
                 <td className="p-1">
                   <a href={a.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">
                     {a.title || a.url}
                   </a>
                 </td>
+                <td className="p-1">{a.source_name || "-"}</td>
                 <td className="p-1">{a.status}</td>
                 <td className="p-1">{formatSeconds(a.crawl_duration_seconds)}</td>
                 <td className="p-1">{formatSeconds(a.analysis_duration_seconds)}</td>

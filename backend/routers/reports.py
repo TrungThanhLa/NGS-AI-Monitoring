@@ -97,15 +97,16 @@ def get_report_articles(job_id: UUID, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Job không tồn tại")
 
     rows = (
-        db.query(Article, ArticleAnalysis)
+        db.query(Article, ArticleAnalysis, Source)
         .outerjoin(ArticleAnalysis, ArticleAnalysis.article_id == Article.article_id)
+        .outerjoin(Source, Source.source_id == Article.source_id)
         .filter(Article.job_id == job_id)
         .order_by(Article.crawled_at)
         .all()
     )
 
     articles = []
-    for article, analysis in rows:
+    for article, analysis, source in rows:
         analysis_duration = analysis.analysis_duration_seconds if analysis else None
         total_duration = None
         if article.crawl_duration_seconds is not None and analysis_duration is not None:
@@ -115,6 +116,7 @@ def get_report_articles(job_id: UUID, db: Session = Depends(get_db)):
                 "title": article.title,
                 "url": article.url,
                 "status": article.status,
+                "source_name": source.name if source else None,
                 "crawl_duration_seconds": article.crawl_duration_seconds,
                 "analysis_duration_seconds": analysis_duration,
                 "total_duration_seconds": total_duration,
