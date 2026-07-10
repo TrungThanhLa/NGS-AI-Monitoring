@@ -4,6 +4,7 @@ import os
 import re
 import time
 from datetime import date, datetime
+from typing import Callable
 
 import httpx
 from bs4 import BeautifulSoup
@@ -23,10 +24,6 @@ _SITEMAP_DATE_PATTERNS: dict[str, re.Pattern] = {
     "vtv.vn": re.compile(
         r"sitemaps-(?P<year>\d{4})-(?P<month>\d{1,2})-(?P<day_start>\d{1,2})-(?P<day_end>\d{1,2})\.xml$"
     ),
-    # VD: https://vov.vn/sitemaps/2026/6/article.xml
-    "vov.vn": re.compile(
-        r"/(?P<year>\d{4})/(?P<month>\d{1,2})/"
-    ),
     # VD: https://www.vietnamplus.vn/sitemaps/news-2026-7.xml (verified 2026-07-01)
     "vietnamplus.vn": re.compile(
         r"news-(?P<year>\d{4})-(?P<month>\d{1,2})\.xml$"
@@ -41,6 +38,40 @@ _SITEMAP_DATE_PATTERNS: dict[str, re.Pattern] = {
         r"sitemap-post/(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2})\.xml$"
     ),
 }
+
+# Domain nào build sub-sitemap theo tháng nhưng CHỈ thêm entry vào index sitemap.xml SAU KHI
+# tháng đã kết thúc (verify thật 2026-07-10: vov.vn/sitemap.xml giữa tháng 7 vẫn chỉ liệt kê
+# tới tháng 6) → không thể dùng index để tìm sub-sitemap của tháng đang chạy (bao gồm cả
+# tháng hiện tại). URL sub-sitemap của các domain này có format cố định, dự đoán được từ
+# (year, month) — bỏ hẳn việc fetch/parse index, tự sinh URL trực tiếp cho MỌI tháng nằm
+# trong date_from..date_to (không riêng tháng hiện tại, để nhất quán và không phụ thuộc
+# index có cập nhật đúng hay không).
+_SITEMAP_URL_TEMPLATES: dict[str, Callable[[int, int], str]] = {
+    # VD: https://vov.vn/sitemaps/2026/7/article.xml (verify tay bằng curl 2026-07-10 —
+    # trả HTTP 200 với bài viết thật dù chưa xuất hiện trong index)
+    "vov.vn": lambda year, month: f"https://vov.vn/sitemaps/{year}/{month}/article.xml",
+}
+
+# Domain nào build sub-sitemap định kỳ (VD vtv.vn — 5 ngày/lần) nên vài ngày gần nhất luôn
+# "rơi" ra ngoài mọi sub-sitemap đã đủ điều kiện đóng khối, nhưng có sẵn 1 sub-sitemap
+# "catch-all" chứa đúng phần bài mới nhất này (verify tay 2026-07-10: latest-news-sitemap.xml
+# có mặt trong chính index, trả HTTP 200 với bài đăng trong ngày) — luôn fetch kèm, không qua
+# _SITEMAP_DATE_PATTERNS (URL không mang ngày tháng trong path nên bị regex loại nếu không
+# xử lý riêng).
+_SITEMAP_ALWAYS_INCLUDE: dict[str, list[str]] = {
+    "vtv.vn": ["https://vtv.vn/latest-news-sitemap.xml"],
+}
+
+
+def _months_in_range(date_from: date, date_to: date) -> list[tuple[int, int]]:
+    months = []
+    year, month = date_from.year, date_from.month
+    while (year, month) <= (date_to.year, date_to.month):
+        months.append((year, month))
+        month += 1
+        if month > 12:
+            month, year = 1, year + 1
+    return months
 
 
 def _parse_lastmod(value: str) -> date:
@@ -162,6 +193,21 @@ def get_article_urls(
             if owns_client:
                 client.close()
 
+    url_template = _SITEMAP_URL_TEMPLATES.get(source.domain)
+    if url_template:
+        # Bỏ hẳn index (source.sitemap_url không được đụng tới) — tự sinh URL sub-sitemap cho
+        # từng tháng nằm trong khoảng ngày yêu cầu, dùng lại đúng helper fetch+dedup+lọc ngày
+        # đã có cho sitemap_pages (bản chất giống nhau: 1 danh sách URL sub-sitemap đã biết
+        # trước, không cần khám phá qua index).
+        generated_locs = [url_template(year, month) for year, month in _months_in_range(date_from, date_to)]
+        try:
+            return _fetch_declared_sitemap_pages(
+                generated_locs, date_from, date_to, client, delay_seconds, max_retries
+            )
+        finally:
+            if owns_client:
+                client.close()
+
     try:
         index_resp = _fetch_with_retry(client, source.sitemap_url, max_retries)
         if index_resp is None or index_resp.status_code >= 400:
@@ -208,6 +254,10 @@ def get_article_urls(
                 " — kiểm tra lại _SITEMAP_DATE_PATTERNS hoặc cấu trúc sitemap đã đổi",
                 source.domain, date_from, date_to,
             )
+
+        for always_loc in _SITEMAP_ALWAYS_INCLUDE.get(source.domain, []):
+            if always_loc not in sub_sitemap_locs:
+                sub_sitemap_locs.append(always_loc)
 
         results = []
         failed_locs = []

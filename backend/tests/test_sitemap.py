@@ -21,7 +21,7 @@ class VTVSource:
 
 
 class VOVSource:
-    """VOV: regex năm-tháng, path-based (/YYYY/M/)."""
+    """VOV: bỏ qua index, tự sinh URL sub-sitemap theo tháng (_SITEMAP_URL_TEMPLATES)."""
     sitemap_url = "https://vov.vn/sitemap.xml"
     domain = "vov.vn"
     parsing_rules = {}
@@ -94,6 +94,10 @@ def make_handler():
             return httpx.Response(200, text=SITEMAP_INDEX)
         if request.url.path == "/sitemaps/sitemaps-2026-6-21-25.xml":
             return httpx.Response(200, text=SUB_SITEMAP)
+        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
+            # VTV luôn fetch kèm catch-all này (_SITEMAP_ALWAYS_INCLUDE) — không liên quan gì
+            # tới test này, trả rỗng.
+            return httpx.Response(200, text="<urlset></urlset>")
         raise AssertionError(f"unexpected request: {request.url}")
 
     return handler, requested
@@ -127,6 +131,8 @@ def test_skips_sub_sitemap_that_keeps_failing_after_retries_without_raising():
         if request.url.path == "/sitemaps/sitemaps-2026-6-21-25.xml":
             attempts["count"] += 1
             raise httpx.ConnectError("boom")
+        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
+            return httpx.Response(200, text="<urlset></urlset>")
         raise AssertionError(f"unexpected request: {request.url}")
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -178,52 +184,6 @@ def test_flat_urlset_returns_all_urls_without_lastmod_filtering():
 
     urls = [item["url"] for item in result]
     assert urls == ["https://bocongan.gov.vn/bai-viet-a", "https://bocongan.gov.vn/bai-viet-b"]
-    assert failed_locs == []
-
-
-def test_recognizes_year_month_only_sub_sitemap_pattern():
-    # VOV dùng pattern path-based (/YYYY/M/): year+month, không có khoảng ngày trong tên sub-sitemap.
-    # Sub-sitemap tháng 4 không giao với yêu cầu tháng 6 → không được fetch.
-    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-    <sitemap>
-        <loc>https://vov.vn/sitemaps/2026/4/article.xml</loc>
-    </sitemap>
-    <sitemap>
-        <loc>https://vov.vn/sitemaps/2026/6/article.xml</loc>
-    </sitemap>
-</sitemapindex>"""
-    sub_sitemap_june = """<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-    <url>
-        <loc>https://vov.vn/bai-viet-thang-6</loc>
-        <lastmod>2026-06-15T10:00:00+07:00</lastmod>
-    </url>
-</urlset>"""
-
-    requested = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
-        if request.url.path == "/sitemap.xml":
-            return httpx.Response(200, text=index_xml)
-        if "2026/6" in str(request.url):
-            return httpx.Response(200, text=sub_sitemap_june)
-        raise AssertionError(f"unexpected request: {request.url}")
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-
-    result, failed_locs = get_article_urls(
-        VOVSource(),
-        date_from=date(2026, 6, 10),
-        date_to=date(2026, 6, 20),
-        client=client,
-        delay_seconds=0,
-    )
-
-    urls = [item["url"] for item in result]
-    assert urls == ["https://vov.vn/bai-viet-thang-6"]
-    assert "https://vov.vn/sitemaps/2026/4/article.xml" not in requested
     assert failed_locs == []
 
 
@@ -288,6 +248,8 @@ def test_vtv_domain_pre_filters_by_date_range():
             return httpx.Response(200, text=index_xml)
         if "6-21-25" in str(request.url):
             return httpx.Response(200, text=sub_sitemap)
+        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
+            return httpx.Response(200, text="<urlset></urlset>")
         raise AssertionError(f"unexpected request: {request.url}")
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -298,41 +260,6 @@ def test_vtv_domain_pre_filters_by_date_range():
 
     assert [item["url"] for item in result] == ["https://vtv.vn/bai-viet-ngay-22.htm"]
     assert "https://vtv.vn/sitemaps/sitemaps-2026-6-01-10.xml" not in requested
-    assert failed_locs == []
-
-
-def test_vov_domain_pre_filters_by_year_month():
-    # domain="vov.vn" → regex year/month path-based → chỉ fetch sub-sitemap của tháng giao yêu cầu
-    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
-<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-    <sitemap><loc>https://vov.vn/sitemaps/2026/4/article.xml</loc></sitemap>
-    <sitemap><loc>https://vov.vn/sitemaps/2026/6/article.xml</loc></sitemap>
-</sitemapindex>"""
-    sub_sitemap_june = """<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-    <url>
-        <loc>https://vov.vn/bai-viet-thang-6-moi</loc>
-        <lastmod>2026-06-15T10:00:00+07:00</lastmod>
-    </url>
-</urlset>"""
-    requested = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        requested.append(str(request.url))
-        if request.url.path == "/sitemap.xml":
-            return httpx.Response(200, text=index_xml)
-        if "2026/6" in str(request.url):
-            return httpx.Response(200, text=sub_sitemap_june)
-        raise AssertionError(f"unexpected request: {request.url}")
-
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    result, failed_locs = get_article_urls(
-        VOVSource(), date_from=date(2026, 6, 10), date_to=date(2026, 6, 20),
-        client=client, delay_seconds=0,
-    )
-
-    assert [item["url"] for item in result] == ["https://vov.vn/bai-viet-thang-6-moi"]
-    assert "https://vov.vn/sitemaps/2026/4/article.xml" not in requested
     assert failed_locs == []
 
 
@@ -735,3 +662,113 @@ def test_returns_index_url_as_failed_loc_when_sitemap_index_request_raises():
 
     assert result == []
     assert failed_locs == ["https://vtv.vn/sitemap.xml"]
+
+
+def test_vov_bypasses_index_and_constructs_current_month_url_directly():
+    # Bug thật phát hiện 2026-07-10: vov.vn/sitemap.xml chỉ thêm entry sub-sitemap của 1
+    # tháng SAU KHI tháng đó đã kết thúc — job chạy giữa tháng 7 không bao giờ thấy được
+    # sub-sitemap tháng 7 qua index. Nhưng URL sub-sitemap có format dự đoán được
+    # (https://vov.vn/sitemaps/{year}/{month}/article.xml) và luôn fetch được thật (verify
+    # tay bằng curl) dù chưa lên index — nên bỏ hẳn việc fetch/parse index cho vov.vn, tự
+    # sinh URL trực tiếp từ date_from/date_to.
+    sub_sitemap_july = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://vov.vn/bai-viet-thang-7-moi</loc><lastmod>2026-07-10T10:00:00+07:00</lastmod></url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if str(request.url) == "https://vov.vn/sitemaps/2026/7/article.xml":
+            return httpx.Response(200, text=sub_sitemap_july)
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VOVSource(), date_from=date(2026, 7, 1), date_to=date(2026, 7, 10),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://vov.vn/bai-viet-thang-7-moi"]
+    assert not any(url.endswith("/sitemap.xml") for url in requested)
+    assert failed_locs == []
+
+
+def test_vov_constructs_urls_for_every_month_spanning_date_range():
+    sub_june = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://vov.vn/bai-thang-6</loc><lastmod>2026-06-28T10:00:00+07:00</lastmod></url>
+</urlset>"""
+    sub_july = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://vov.vn/bai-thang-7</loc><lastmod>2026-07-02T10:00:00+07:00</lastmod></url>
+</urlset>"""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url == "https://vov.vn/sitemaps/2026/6/article.xml":
+            return httpx.Response(200, text=sub_june)
+        if url == "https://vov.vn/sitemaps/2026/7/article.xml":
+            return httpx.Response(200, text=sub_july)
+        raise AssertionError(f"unexpected request: {url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VOVSource(), date_from=date(2026, 6, 25), date_to=date(2026, 7, 5),
+        client=client, delay_seconds=0,
+    )
+
+    assert sorted(item["url"] for item in result) == ["https://vov.vn/bai-thang-6", "https://vov.vn/bai-thang-7"]
+    assert failed_locs == []
+
+
+def test_vov_records_failed_loc_when_constructed_month_url_fails():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("boom", request=request)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VOVSource(), date_from=date(2026, 7, 1), date_to=date(2026, 7, 10),
+        client=client, delay_seconds=0, max_retries=1,
+    )
+
+    assert result == []
+    assert failed_locs == ["https://vov.vn/sitemaps/2026/7/article.xml"]
+
+
+def test_vtv_always_includes_latest_news_sitemap_regardless_of_date_pattern():
+    # Bug thật phát hiện 2026-07-10: vtv.vn build sub-sitemap theo khoảng 5 ngày/lần — vài
+    # ngày gần nhất (chưa đủ 5 ngày để đóng khối) không nằm trong sub-sitemap nào theo
+    # _SITEMAP_DATE_PATTERNS. Nhưng vtv.vn có sẵn 1 sub-sitemap "catch-all" luôn tồn tại
+    # (latest-news-sitemap.xml, verify tay: nằm trong chính index, không mang ngày tháng
+    # trong path nên bị regex loại) — luôn fetch kèm, không qua bộ lọc ngày.
+    index_xml = """<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <sitemap><loc>https://vtv.vn/sitemaps/sitemaps-2026-6-21-25.xml</loc></sitemap>
+    <sitemap><loc>https://vtv.vn/latest-news-sitemap.xml</loc></sitemap>
+</sitemapindex>"""
+    latest_news = """<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url><loc>https://vtv.vn/bai-moi-nhat-chua-len-sub-sitemap</loc><lastmod>2026-07-10T10:00:00+07:00</lastmod></url>
+</urlset>"""
+    requested = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested.append(str(request.url))
+        if request.url.path == "/sitemap.xml":
+            return httpx.Response(200, text=index_xml)
+        if str(request.url) == "https://vtv.vn/latest-news-sitemap.xml":
+            return httpx.Response(200, text=latest_news)
+        if "6-21-25" in str(request.url):
+            return httpx.Response(200, text="<urlset></urlset>")
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result, failed_locs = get_article_urls(
+        VTVSource(), date_from=date(2026, 7, 6), date_to=date(2026, 7, 10),
+        client=client, delay_seconds=0,
+    )
+
+    assert [item["url"] for item in result] == ["https://vtv.vn/bai-moi-nhat-chua-len-sub-sitemap"]
+    assert "https://vtv.vn/latest-news-sitemap.xml" in requested
+    assert failed_locs == []
