@@ -31,6 +31,7 @@ def get_url_hash(url: str) -> str:
 
 **Quy tắc:**
 - Dedup bằng `SHA256(url)` **trong phạm vi 1 job** trước khi insert vào bảng `articles` — không dedup xuyên job: mỗi job crawl/phân tích lại từ đầu dù trùng URL với job khác (kể cả job đã thành công), để không bỏ lỡ nội dung đã thay đổi và không tạo dữ liệu "mồ côi" khi job cũ fail/cancel giữa chừng (2026-07-09). Chống trùng bằng 2 lớp: `set()` Python cục bộ trong 1 lần chạy job (nhanh, không đụng DB) + `UNIQUE` composite `(job_id, url_hash)` ở DB làm lưới an toàn dự phòng
+- `MAX_ARTICLES_PER_JOB` mặc định áp dụng tuần tự theo `source_ids` — nguồn đầu tiên đủ bài sẽ "ăn hết" ngân sách trước khi chạm tới nguồn sau. Bật `EVEN_DISTRIBUTE_ACROSS_SOURCES=true` để chia đều ngân sách cho từng nguồn đã chọn (dư dồn nguồn đầu theo thứ tự `source_ids`) — hữu ích khi test với số bài nhỏ nhưng muốn thấy đa dạng nguồn. Không bù thiếu hụt: nguồn nào không đủ bài để lấp đầy quota của nó thì lấy được bấy nhiêu, tổng job có thể ít hơn `MAX_ARTICLES_PER_JOB` đã cấu hình (xem lý do đầy đủ ở `docs/superpowers/specs/2026-07-10-even-distribute-sources-design.md`)
 - Delay 1–2 giây giữa các request đến cùng một domain — tránh bị block
 - Website dùng JavaScript render (JS-heavy) → dùng Playwright thay cho httpx
 - Cấu hình CSS selector riêng theo từng nguồn lưu ở cột `sources.parsing_rules` (JSONB), dạng `{title, content, date, author}`
