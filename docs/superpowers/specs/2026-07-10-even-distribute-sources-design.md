@@ -3,6 +3,25 @@
 **Ngày:** 2026-07-10
 **Trạng thái:** Đã duyệt với user, sẵn sàng chuyển sang implementation plan
 
+## Cập nhật sau verify thật (2026-07-10, revision 2) — đổi quyết định #3 "không bù" → "có bù"
+
+Sau khi implement + verify job thật với dữ liệu thật (3 nguồn VTV/Vietnam.vn/TinGia, cùng 1
+ngày), phát hiện đánh đổi "không bù thiếu hụt" ở quyết định #3 gây khó chịu hơn dự tính: TinGia
+không có bài nào trong ngày đó → quota 2 của TinGia bị bỏ phí hoàn toàn, dù VTV/Vietnam.vn thừa
+khả năng crawl thêm (job 2 nguồn cùng ngày, không có TinGia, VTV lấy được 3 bài thật — chứng
+minh VTV có đủ bài, chỉ là quota ban đầu giới hạn nó ở 1). User yêu cầu đổi sang **có bù**.
+
+**Quyết định #3 mới:** dùng thuật toán **water-filling** — quota của từng nguồn được tính LẠI
+ngay trước khi xử lý nguồn đó (không tính 1 lần cố định trước loop), dựa trên:
+`quota_nguồn_này = _distribute_evenly(ngân_sách_còn_lại, số_nguồn_chưa_xử_lý)[0]`
+
+Trong đó `ngân_sách_còn_lại = max_articles - số_bài_đã_crawl_thật_tính_đến_lúc_này` (đã tự động
+trừ đúng phần các nguồn trước đã lấy được, kể cả khi ít hơn quota ban đầu của chúng). Nhờ vậy,
+nguồn nào thiếu bài sẽ tự động "nhường" ngân sách chưa dùng cho các nguồn xử lý sau, tổng job
+tiến gần tới đúng `MAX_ARTICLES_PER_JOB` hơn (miễn tổng candidate thật của các nguồn còn lại đủ).
+Không cần hàm mới — tái dùng `_distribute_evenly()` đã có, chỉ đổi cách gọi (gọi lại mỗi vòng
+nguồn thay vì gọi 1 lần trước loop). Quyết định #1, #2 giữ nguyên không đổi.
+
 ## Bối cảnh & vấn đề
 
 `_crawl_sources()` (`backend/workers/report_job.py`) hiện duyệt tuần tự từng nguồn trong `job.source_ids`, chỉ dừng khi **tổng số bài toàn job** chạm `MAX_ARTICLES_PER_JOB`. Hệ quả: nếu nguồn đầu tiên (theo thứ tự chọn ở FE) có đủ bài trong khoảng ngày yêu cầu, các nguồn còn lại không bao giờ được crawl. Đã ghi nhận thật nhiều lần (Slice 2 verify tingia.gov.vn, Slice 3 verify VTV, Slice 4 verify VTV) — luôn chỉ 1 nguồn "ăn hết" ngân sách.

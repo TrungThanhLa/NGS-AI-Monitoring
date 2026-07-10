@@ -55,12 +55,6 @@ def _crawl_sources(db, job: Job) -> None:
     delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     max_articles = _parse_max_articles(os.environ.get("MAX_ARTICLES_PER_JOB"))
     even_distribute = os.environ.get("EVEN_DISTRIBUTE_ACROSS_SOURCES", "false").lower() == "true"
-    # Chia đều max_articles cho từng nguồn đã chọn (đúng thứ tự job.source_ids) — chỉ áp
-    # dụng khi bật cờ VÀ có giới hạn tổng (max_articles=None nghĩa là không giới hạn, chia
-    # đều một giá trị vô hạn không có ý nghĩa). None = giữ nguyên hành vi cũ, chỉ check tổng job.
-    per_source_quota: list[int] | None = None
-    if even_distribute and max_articles is not None and job.source_ids:
-        per_source_quota = _distribute_evenly(max_articles, len(job.source_ids))
 
     # Chỉ chống trùng URL TRONG PHẠM VI 1 lần chạy job này (không đụng DB) — một số nguồn
     # (VD sitemap index) có thể vô tình trả về cùng 1 URL 2 lần. KHÔNG chặn URL đã crawl ở
@@ -76,9 +70,21 @@ def _crawl_sources(db, job: Job) -> None:
     def source_crawled_count(source_id) -> int:
         return db.query(Article).filter_by(job_id=job.job_id, source_id=source_id).count()
 
+    num_sources = len(job.source_ids)
     for idx, source_id in enumerate(job.source_ids):
         if max_articles is not None and crawled_count() >= max_articles:
             break
+
+        # Water-filling: tính lại quota của nguồn này ngay trước khi xử lý, dựa trên ngân
+        # sách CÒN LẠI thật (đã trừ những gì các nguồn trước đã crawl được) chia cho số
+        # nguồn CHƯA xử lý (gồm cả nguồn hiện tại) — không dùng quota cố định tính 1 lần
+        # trước loop. Nhờ vậy, nguồn nào thiếu bài (VD không có bài đăng đúng ngày yêu cầu)
+        # sẽ tự động "nhường" phần ngân sách chưa dùng cho các nguồn sau, thay vì bỏ phí.
+        quota_for_source: int | None = None
+        if even_distribute and max_articles is not None:
+            remaining_budget = max_articles - crawled_count()
+            remaining_sources = num_sources - idx
+            quota_for_source = _distribute_evenly(remaining_budget, remaining_sources)[0]
 
         source = db.get(Source, source_id)
         try:
@@ -102,7 +108,7 @@ def _crawl_sources(db, job: Job) -> None:
         for candidate in candidates:
             if max_articles is not None and crawled_count() >= max_articles:
                 break
-            if per_source_quota is not None and source_crawled_count(source.source_id) >= per_source_quota[idx]:
+            if quota_for_source is not None and source_crawled_count(source.source_id) >= quota_for_source:
                 break
 
             if candidate["url"] in seen_urls:

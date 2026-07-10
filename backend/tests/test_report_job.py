@@ -846,7 +846,7 @@ def test_crawl_sources_distributes_evenly_across_sources_when_flag_enabled(db_se
         db_session.commit()
 
 
-def test_crawl_sources_does_not_compensate_shortfall_from_other_sources(db_session, monkeypatch):
+def test_crawl_sources_compensates_shortfall_from_earlier_sources(db_session, monkeypatch):
     monkeypatch.setenv("MAX_ARTICLES_PER_JOB", "5")
     monkeypatch.setenv("EVEN_DISTRIBUTE_ACROSS_SOURCES", "true")
 
@@ -863,7 +863,9 @@ def test_crawl_sources_does_not_compensate_shortfall_from_other_sources(db_sessi
     db_session.add(job)
     db_session.flush()
 
-    # Quota tính được là [2, 2, 1] cho A/B/C. Nguồn A chỉ có 1 candidate (thiếu 1 so với quota).
+    # Quota ban đầu (nếu không bù) là [2, 2, 1] cho A/B/C. Nguồn A chỉ có 1 candidate (thiếu
+    # 1 so với quota) — phần thiếu đó phải được dồn sang B/C (water-filling): sau khi A chỉ
+    # lấy được 1, ngân sách còn lại 4 chia đều cho 2 nguồn còn lại (B, C) → quota mới [2, 2].
     def fake_get_article_urls(source, date_from, date_to):
         if source.source_id == source_a.source_id:
             return ([{"url": f"https://{source.domain}/x", "lastmod": date(2026, 6, 1)}], [])
@@ -889,10 +891,10 @@ def test_crawl_sources_does_not_compensate_shortfall_from_other_sources(db_sessi
         count_c = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_c.source_id).count()
         total = db_session.query(Article).filter_by(job_id=job.job_id).count()
 
-        assert count_a == 1  # thiếu hụt, không bù
-        assert count_b == 2  # vẫn đúng quota của B, không nhận thêm phần thiếu của A
-        assert count_c == 1
-        assert total == 4  # ít hơn MAX_ARTICLES_PER_JOB=5 — đánh đổi đã chốt trong spec
+        assert count_a == 1  # thiếu hụt thật (chỉ có 1 candidate)
+        assert count_b == 2  # nhận quota được tính lại sau khi A thiếu hụt
+        assert count_c == 2  # nhận quota được tính lại sau khi A thiếu hụt
+        assert total == 5  # đạt đúng MAX_ARTICLES_PER_JOB nhờ bù quota
     finally:
         db_session.query(Article).filter_by(job_id=job.job_id).delete()
         db_session.delete(job)
