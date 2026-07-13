@@ -469,8 +469,10 @@ def test_history_returns_report_with_source_names_and_date_range(app_client, db_
 
         assert response.status_code == 200
         body = response.json()["history"]
-        assert len(body) == 1
-        entry = body[0]
+        # Không giả định DB rỗng — dùng report_id để tìm đúng dòng vừa tạo, vì DB dev
+        # là DB thật dùng chung, có thể có sẵn report_history từ job thật khác (VD job
+        # verify tay ở Task A3) đang chạy song song hoặc để lại từ trước.
+        entry = next(e for e in body if e["report_id"] == str(report.report_id))
         assert entry["job_id"] == str(job.job_id)
         assert entry["file_path"] == "/storage/report.docx"
         assert entry["date_from"] == "2026-06-01"
