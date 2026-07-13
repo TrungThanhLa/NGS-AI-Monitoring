@@ -1,5 +1,10 @@
-# PROJECT_OVERVIEW.md — Tài liệu tổng quan dự án NGS Monitor
+# PROJECT_OVERVIEW.md — Tài liệu tổng quan dự án NGS Monitor (ĐÃ ARCHIVE — LỖI THỜI)
 
+> **Đã archive 2026-07-13:** nội dung file này dừng ở mốc 2026-06-26 (Slice 1 vừa xong)
+> và trùng lặp phần lớn với root `CLAUDE.md` + `.claude/rules/*.md` hiện tại (đã cập
+> nhật tới Slice 4). Giữ lại chỉ để tham khảo lịch sử — **không dùng file này để nắm
+> trạng thái dự án**, dùng `CLAUDE.md` (luôn cập nhật) thay thế.
+>
 > Tài liệu này dành cho người mới (Engineer, PO, PM, BA...) muốn hiểu nhanh dự án này
 > đang làm gì, vận hành ra sao, và đang ở giai đoạn nào. Viết bằng tiếng Việt, ngôn ngữ
 > đơn giản, có chú thích thuật ngữ kỹ thuật.
