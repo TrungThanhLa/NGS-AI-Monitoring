@@ -122,7 +122,7 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 
 ### Slice 5 — UX & vận hành hoàn chỉnh
 - [x] Job status polling + progress UI chi tiết (`crawled/analyzed/total_estimated`) — đã làm ở Slice 1, mở rộng thêm bảng crawl trực tiếp + Cancel (xem Slice 1)
-- [ ] Trang lịch sử báo cáo (`GET /api/reports/history`)
+- [x] Trang lịch sử báo cáo (`GET /api/reports/history`)
 - [ ] Error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) (retry, timeout, JS-render fallback Playwright) — **đã làm trước 1 phần:** AI timeout chỉ skip 1 bài (không fail cả job), crawler lỗi (article + sub-sitemap) hiện `status="error"` trên UI; **còn thiếu:** JS-render fallback Playwright chưa làm
 - **Verify:** giả lập timeout/JSON lỗi/nguồn bị block → job xử lý đúng theo bảng error-handling, không crash toàn job
 
