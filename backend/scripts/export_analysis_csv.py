@@ -5,8 +5,9 @@ from backend.db import SessionLocal
 from backend.models import Article, ArticleAnalysis
 
 
-def export_analysis_csv(job_id: str, output_path: str) -> None:
-    db = SessionLocal()
+def export_analysis_csv(job_id: str, output_path: str, db=None) -> None:
+    owns_db = db is None
+    db = db or SessionLocal()
     try:
         # INNER JOIN: chỉ xuất bài đã có ArticleAnalysis (giống aggregator.py) — bài
         # status="error"/"pending_analysis" (chưa/không phân tích được) bị loại khỏi CSV.
@@ -43,7 +44,8 @@ def export_analysis_csv(job_id: str, output_path: str) -> None:
                     ]
                 )
     finally:
-        db.close()
+        if owns_db:
+            db.close()
 
 
 if __name__ == "__main__":

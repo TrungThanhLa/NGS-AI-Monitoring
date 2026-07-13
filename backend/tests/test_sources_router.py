@@ -4,14 +4,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.db import get_db
 from backend.models import Source
 from backend.routers import sources
 
 
 @pytest.fixture
-def app_client():
+def app_client(db_session):
     app = FastAPI()
     app.include_router(sources.router)
+    app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)
 
 

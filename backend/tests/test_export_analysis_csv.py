@@ -46,7 +46,7 @@ def test_export_analysis_csv_writes_expected_row(db_session, tmp_path):
     output_path = tmp_path / "export.csv"
 
     try:
-        export_analysis_csv(str(job.job_id), str(output_path))
+        export_analysis_csv(str(job.job_id), str(output_path), db=db_session)
 
         with open(output_path, newline="", encoding="utf-8") as f:
             rows = list(csv.DictReader(f))

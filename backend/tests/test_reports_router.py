@@ -1,19 +1,24 @@
 import uuid
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.db import get_db
 from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
 from backend.routers import reports
 
 
 @pytest.fixture
-def app_client():
+def app_client(db_session):
     app = FastAPI()
     app.include_router(reports.router)
+    # Ép API dùng chung session/transaction với fixture db_session, để rollback
+    # ở cuối test dọn sạch cả dữ liệu do request API tạo ra (không chỉ dữ liệu
+    # insert thẳng qua db_session) — xem conftest.py.
+    app.dependency_overrides[get_db] = lambda: db_session
     return TestClient(app)
 
 
@@ -516,10 +521,14 @@ def test_history_orders_by_created_at_desc(app_client, db_session):
     db_session.add_all([job1, job2])
     db_session.flush()
 
-    report1 = ReportHistory(job_id=job1.job_id, file_path="/storage/r1.docx")
+    # created_at đặt tay (không dùng server_default=func.now()) — NOW() của Postgres
+    # đứng yên trong suốt 1 transaction, nên 2 lần commit liên tiếp trong cùng test
+    # (chạy trong 1 transaction bọc ngoài để rollback cuối test) sẽ ra cùng giá trị
+    # nếu để mặc định, làm thứ tự created_at không xác định.
+    report1 = ReportHistory(job_id=job1.job_id, file_path="/storage/r1.docx", created_at=datetime(2026, 1, 1))
     db_session.add(report1)
     db_session.commit()
-    report2 = ReportHistory(job_id=job2.job_id, file_path="/storage/r2.docx")
+    report2 = ReportHistory(job_id=job2.job_id, file_path="/storage/r2.docx", created_at=datetime(2026, 1, 2))
     db_session.add(report2)
     db_session.commit()
 
