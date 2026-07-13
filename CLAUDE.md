@@ -51,6 +51,7 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 - **Slice 4 (Report đầy đủ) — hoàn thành (2026-07-10):** aggregate đầy đủ (`source_counts`/`topic_counts`/`keyword_counts`/`monthly_counts`/`summary_stats`) + DOCX theo đúng `sample_report_form.docx` + validate `emotion` enum (giá trị lạ → `emotion=None`+`needs_review=true`). Verify job thật khớp 100% với query DB trực tiếp
 - **EVEN_DISTRIBUTE_ACROSS_SOURCES — water-filling (2026-07-10):** chia đều + bù quota thiếu hụt giữa các nguồn đã chọn, tổng job tiến gần đúng `MAX_ARTICLES_PER_JOB` thay vì để nguồn đầu "ăn hết" ngân sách
 - **Sửa 2 hạn chế sitemap index VOV/VTV + bỏ 1 request thừa (2026-07-10):** `_SITEMAP_URL_TEMPLATES` (VOV, tự sinh URL sub-sitemap không qua index) + `_SITEMAP_ALWAYS_INCLUDE` (VTV, fetch kèm catch-all khi `date_to >= today`) — cả 2 đã verify job thật
+- **Playwright JS-render fallback (2026-07-13):** `fetch_article_playwright()` — thay bước fetch bằng headless Chromium, tái dùng CSS selector `parsing_rules` giống engine httpx (không tự nhận diện nội dung như Crawl4AI); bật qua `parsing_rules.engine="playwright"`
 
 ### Trạng thái hiện tại
 - Slice 0–4: hoàn thành, đã merge `main`, verify job thật cho từng slice (chi tiết ở [docs/CHANGELOG.md](docs/CHANGELOG.md))
@@ -123,7 +124,7 @@ Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file 
 ### Slice 5 — UX & vận hành hoàn chỉnh
 - [x] Job status polling + progress UI chi tiết (`crawled/analyzed/total_estimated`) — đã làm ở Slice 1, mở rộng thêm bảng crawl trực tiếp + Cancel (xem Slice 1)
 - [x] Trang lịch sử báo cáo (`GET /api/reports/history`)
-- [ ] Error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) (retry, timeout, JS-render fallback Playwright) — **đã làm trước 1 phần:** AI timeout chỉ skip 1 bài (không fail cả job), crawler lỗi (article + sub-sitemap) hiện `status="error"` trên UI; **còn thiếu:** JS-render fallback Playwright chưa làm
+- [x] Error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) (retry, timeout, JS-render fallback Playwright) — hoàn thành
 - **Verify:** giả lập timeout/JSON lỗi/nguồn bị block → job xử lý đúng theo bảng error-handling, không crash toàn job
 
 ### Slice 6 — Admin UI quản lý nguồn

@@ -39,14 +39,17 @@ def get_url_hash(url: str) -> str:
 
 ---
 
-## Fetch article content — 2 engine (httpx mặc định / Crawl4AI tùy chọn)
+## Fetch article content — 3 engine (httpx mặc định / Crawl4AI / Playwright tùy chọn)
 
 Điểm vào duy nhất gọi từ `workers/report_job.py`: `fetch_article_dispatch(url, source.parsing_rules)` (`backend/crawler/crawl4ai_client.py`) — rẽ nhánh theo key `engine` trong `parsing_rules`:
 
 ```python
 def fetch_article_dispatch(url: str, parsing_rules: dict) -> dict | None:
-    if parsing_rules.get("engine") == "crawl4ai":
+    engine = parsing_rules.get("engine")
+    if engine == "crawl4ai":
         return fetch_article_crawl4ai(url)
+    if engine == "playwright":
+        return fetch_article_playwright(url, parsing_rules)
     return fetch_article(url, parsing_rules)   # httpx + CSS selector — mặc định, không đổi
 ```
 
@@ -57,6 +60,7 @@ def fetch_article_dispatch(url: str, parsing_rules: dict) -> dict | None:
   - **Hạn chế đã biết, chấp nhận tạm thời:** nguồn nhúng box "bài liên quan" ngay trong nội dung chính (không có heading riêng, gặp ở VOV) thì vẫn còn dư rác (~600-700 ký tự) sau bước trim — CSS selector thủ công cũng gặp đúng vấn đề này (rác nằm trong chính content container), không phải nhược điểm riêng của Crawl4AI. Đã cân nhắc dùng thêm `excluded_selector` của Crawl4AI để dọn tiếp nhưng quyết định chưa làm — xem CLAUDE.md "Quyết định quan trọng & lý do" (2026-06-29)
   - Phụ thuộc nặng hơn nhiều so với httpx (kéo theo `numpy`, `scipy`, `playwright`, `patchright`... dù chỉ dùng HTTP-only) — chỉ nên bật cho nguồn thực sự cần (chưa có CSS selector hoạt động tốt), không cần đổi nguồn đang chạy ổn (VTV)
   - Không tự retry khi lỗi network (khác với `fetch_article()` httpx có retry 3 lần exponential backoff) — lỗi/thiếu title hoặc content → trả `None`, vẫn được `report_job.py` xử lý như crawl lỗi bình thường (insert `Article(status="error")`)
+- **`"engine": "playwright"`** — `fetch_article_playwright()` (`crawler/playwright_client.py`), dùng Playwright (headless Chromium) để render trang có JavaScript rồi lấy HTML đã render, sau đó parse bằng **đúng CSS selector khai trong `parsing_rules`** (`title`/`content`/`author`/`date`) — khác với Crawl4AI (tự nhận diện nội dung), Playwright chỉ thay bước fetch, không thay bước parse. Admin phải khai CSS selector khi cấu hình nguồn dùng engine này, giống engine mặc định httpx. Có retry 3 lần exponential backoff giống httpx (không phải ngoại lệ như Crawl4AI).
 
 ---
 
