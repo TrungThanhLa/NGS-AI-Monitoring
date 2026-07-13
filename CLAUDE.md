@@ -56,7 +56,7 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 ### Trạng thái hiện tại
 - Slice 0–4: hoàn thành, đã merge `main`, verify job thật cho từng slice (chi tiết ở [docs/CHANGELOG.md](docs/CHANGELOG.md))
 - BoCongAn: code + migration `0005` đã push `main`, **chưa verify bằng job thật** — bị chặn WAF (Incapsula) từ mạng hiện tại, không phải lỗi code (3 unit test suite pass)
-- Slice 5–6: chưa bắt đầu
+- Slice 5: hoàn thành (trang lịch sử báo cáo + error handling JS-render fallback Playwright). Slice 6: chưa bắt đầu
 
 ### Bước tiếp theo
 1. Chạy lại job thật cho bocongan.gov.vn khi mạng không còn bị Incapsula WAF chặn (thử lại sau vài giờ/vài ngày, hoặc từ mạng khác) — code + migration đã sẵn sàng, chỉ còn thiếu bước verify bằng dữ liệu thật
