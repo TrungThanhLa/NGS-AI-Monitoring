@@ -151,7 +151,10 @@ export default function Home() {
 
   return (
     <main className="p-8 max-w-4xl">
-      <h1 className="text-2xl font-bold mb-4">NGS Monitor</h1>
+      <div className="mb-4 flex items-center justify-between">
+        <h1 className="text-2xl font-bold">NGS Monitor</h1>
+        <a href="/history" className="text-blue-600 underline text-sm">Lịch sử báo cáo</a>
+      </div>
 
       <div className="mb-4 grid grid-cols-2 gap-4">
         <SourceSidebar sources={sources} selectedIds={selectedSourceIds} onToggle={toggleSource} />

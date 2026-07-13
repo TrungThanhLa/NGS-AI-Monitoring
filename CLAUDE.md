@@ -60,7 +60,7 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 
 ### Bước tiếp theo
 1. Chạy lại job thật cho bocongan.gov.vn khi mạng không còn bị Incapsula WAF chặn (thử lại sau vài giờ/vài ngày, hoặc từ mạng khác) — code + migration đã sẵn sàng, chỉ còn thiếu bước verify bằng dữ liệu thật
-2. Bắt đầu Slice 5 (UX & vận hành hoàn chỉnh: trang lịch sử báo cáo `GET /api/reports/history`, error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) — còn thiếu JS-render fallback Playwright)
+2. Slice 6 (Admin UI quản lý nguồn: CRUD metadata, xem/sửa `parsing_rules` kèm form tùy chọn theo loại nguồn)
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
