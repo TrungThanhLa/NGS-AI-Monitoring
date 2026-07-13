@@ -134,3 +134,19 @@ def test_dispatch_calls_httpx_fetch_when_engine_not_configured(monkeypatch):
 
     assert captured["called_with"] == (URL, parsing_rules)
     assert result == {"title": "fake-httpx"}
+
+
+def test_dispatch_calls_playwright_when_engine_configured(monkeypatch):
+    captured = {}
+
+    def fake_fetch_playwright(url, parsing_rules):
+        captured["called_with"] = (url, parsing_rules)
+        return {"title": "fake-playwright"}
+
+    monkeypatch.setattr("backend.crawler.crawl4ai_client.fetch_article_playwright", fake_fetch_playwright)
+
+    parsing_rules = {"engine": "playwright", "title": "h1"}
+    result = fetch_article_dispatch(URL, parsing_rules)
+
+    assert captured["called_with"] == (URL, parsing_rules)
+    assert result == {"title": "fake-playwright"}

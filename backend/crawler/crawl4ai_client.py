@@ -8,6 +8,7 @@ from crawl4ai.async_crawler_strategy import AsyncHTTPCrawlerStrategy
 from crawl4ai.content_filter_strategy import PruningContentFilter
 
 from backend.crawler.article import compute_url_hash, fetch_article
+from backend.crawler.playwright_client import fetch_article_playwright
 
 # "Tin liên quan"/"Bình luận" là convention phổ biến của báo điện tử Việt Nam đánh dấu
 # ranh giới giữa nội dung bài viết thật và phần rác (bài gợi ý, box bình luận) — đã verify
@@ -59,6 +60,9 @@ def fetch_article_crawl4ai(url: str, runner=None) -> dict | None:
 
 
 def fetch_article_dispatch(url: str, parsing_rules: dict) -> dict | None:
-    if parsing_rules.get("engine") == "crawl4ai":
+    engine = parsing_rules.get("engine")
+    if engine == "crawl4ai":
         return fetch_article_crawl4ai(url)
+    if engine == "playwright":
+        return fetch_article_playwright(url, parsing_rules)
     return fetch_article(url, parsing_rules)
