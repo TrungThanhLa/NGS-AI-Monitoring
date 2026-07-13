@@ -430,15 +430,24 @@ def test_create_logs_warning_when_overlaps_running_job_same_source(app_client, a
 
 
 def test_history_returns_empty_list_when_no_reports(app_client, db_session):
-    # Delete any report_history records to test empty list scenario
-    # (we can't delete jobs due to foreign key constraints, but we can delete report_history)
+    # Capture existing rows before deletion to restore them afterward
+    existing = db_session.query(ReportHistory).all()
+    existing_data = [
+        {"report_id": r.report_id, "job_id": r.job_id, "file_path": r.file_path, "created_at": r.created_at}
+        for r in existing
+    ]
     db_session.query(ReportHistory).delete()
     db_session.commit()
 
-    response = app_client.get("/api/reports/history")
+    try:
+        response = app_client.get("/api/reports/history")
 
-    assert response.status_code == 200
-    assert response.json() == {"history": []}
+        assert response.status_code == 200
+        assert response.json() == {"history": []}
+    finally:
+        for row in existing_data:
+            db_session.add(ReportHistory(**row))
+        db_session.commit()
 
 
 def test_history_returns_report_with_source_names_and_date_range(app_client, db_session, active_source):
@@ -460,8 +469,8 @@ def test_history_returns_report_with_source_names_and_date_range(app_client, db_
 
         assert response.status_code == 200
         body = response.json()["history"]
-        # Filter to find our specific report in case there's old data
-        entry = next(e for e in body if e["report_id"] == str(report.report_id))
+        assert len(body) == 1
+        entry = body[0]
         assert entry["job_id"] == str(job.job_id)
         assert entry["file_path"] == "/storage/report.docx"
         assert entry["date_from"] == "2026-06-01"
