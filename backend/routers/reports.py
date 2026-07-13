@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
-from backend.models import Article, ArticleAnalysis, Job, Source
+from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
 from backend.workers.celery_app import celery_app
 from backend.workers.report_job import run_report_job
 
@@ -70,6 +70,42 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
     run_report_job.apply_async(args=[str(job.job_id)], task_id=task_id)
 
     return {"job_id": str(job.job_id), "status": job.status}
+
+
+@router.get("/history")
+def get_report_history(db: Session = Depends(get_db)):
+    rows = (
+        db.query(ReportHistory, Job)
+        .join(Job, Job.job_id == ReportHistory.job_id)
+        .order_by(ReportHistory.created_at.desc())
+        .all()
+    )
+
+    all_source_ids = {source_id for _, job in rows for source_id in (job.source_ids or [])}
+    sources_by_id = {}
+    if all_source_ids:
+        sources_by_id = {
+            source.source_id: source.name
+            for source in db.query(Source).filter(Source.source_id.in_(all_source_ids)).all()
+        }
+
+    history = [
+        {
+            "report_id": str(report.report_id),
+            "job_id": str(job.job_id),
+            "file_path": report.file_path,
+            "created_at": report.created_at,
+            "date_from": job.date_from,
+            "date_to": job.date_to,
+            "job_status": job.status,
+            "source_names": [
+                sources_by_id[source_id] for source_id in (job.source_ids or []) if source_id in sources_by_id
+            ],
+        }
+        for report, job in rows
+    ]
+
+    return {"history": history}
 
 
 @router.get("/{job_id}/status")

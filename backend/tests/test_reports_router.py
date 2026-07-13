@@ -6,7 +6,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.models import Article, ArticleAnalysis, Job, Source
+from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
 from backend.routers import reports
 
 
@@ -426,4 +426,103 @@ def test_create_logs_warning_when_overlaps_running_job_same_source(app_client, a
         db_session.query(Job).filter_by(job_id=new_job_id).delete()
     finally:
         db_session.delete(existing_job)
+        db_session.commit()
+
+
+def test_history_returns_empty_list_when_no_reports(app_client, db_session):
+    # Delete any report_history records to test empty list scenario
+    # (we can't delete jobs due to foreign key constraints, but we can delete report_history)
+    db_session.query(ReportHistory).delete()
+    db_session.commit()
+
+    response = app_client.get("/api/reports/history")
+
+    assert response.status_code == 200
+    assert response.json() == {"history": []}
+
+
+def test_history_returns_report_with_source_names_and_date_range(app_client, db_session, active_source):
+    job = Job(
+        source_ids=[active_source.source_id],
+        date_from=date(2026, 6, 1),
+        date_to=date(2026, 6, 30),
+        status="completed",
+    )
+    db_session.add(job)
+    db_session.flush()
+
+    report = ReportHistory(job_id=job.job_id, file_path="/storage/report.docx")
+    db_session.add(report)
+    db_session.commit()
+
+    try:
+        response = app_client.get("/api/reports/history")
+
+        assert response.status_code == 200
+        body = response.json()["history"]
+        # Filter to find our specific report in case there's old data
+        entry = next(e for e in body if e["report_id"] == str(report.report_id))
+        assert entry["job_id"] == str(job.job_id)
+        assert entry["file_path"] == "/storage/report.docx"
+        assert entry["date_from"] == "2026-06-01"
+        assert entry["date_to"] == "2026-06-30"
+        assert entry["job_status"] == "completed"
+        assert entry["source_names"] == [active_source.name]
+    finally:
+        # Delete ReportHistory first to respect foreign key constraint
+        db_session.delete(report)
+        db_session.commit()
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_history_returns_empty_source_names_when_job_has_no_sources(app_client, db_session):
+    job = Job(source_ids=[], date_from=date(2026, 6, 1), date_to=date(2026, 6, 30), status="completed")
+    db_session.add(job)
+    db_session.flush()
+
+    report = ReportHistory(job_id=job.job_id, file_path="/storage/report-no-source.docx")
+    db_session.add(report)
+    db_session.commit()
+
+    try:
+        response = app_client.get("/api/reports/history")
+
+        body = response.json()["history"]
+        entry = next(e for e in body if e["report_id"] == str(report.report_id))
+        assert entry["source_names"] == []
+    finally:
+        # Delete ReportHistory first to respect foreign key constraint
+        db_session.delete(report)
+        db_session.commit()
+        db_session.delete(job)
+        db_session.commit()
+
+
+def test_history_orders_by_created_at_desc(app_client, db_session):
+    job1 = Job(source_ids=[], date_from=date(2026, 1, 1), date_to=date(2026, 1, 31), status="completed")
+    job2 = Job(source_ids=[], date_from=date(2026, 2, 1), date_to=date(2026, 2, 28), status="completed")
+    db_session.add_all([job1, job2])
+    db_session.flush()
+
+    report1 = ReportHistory(job_id=job1.job_id, file_path="/storage/r1.docx")
+    db_session.add(report1)
+    db_session.commit()
+    report2 = ReportHistory(job_id=job2.job_id, file_path="/storage/r2.docx")
+    db_session.add(report2)
+    db_session.commit()
+
+    try:
+        response = app_client.get("/api/reports/history")
+
+        body = response.json()["history"]
+        report_ids = [entry["report_id"] for entry in body]
+        assert report_ids.index(str(report2.report_id)) < report_ids.index(str(report1.report_id))
+    finally:
+        # Delete ReportHistory records first to respect foreign key constraint
+        db_session.delete(report1)
+        db_session.delete(report2)
+        db_session.commit()
+        db_session.delete(job1)
+        db_session.delete(job2)
         db_session.commit()
