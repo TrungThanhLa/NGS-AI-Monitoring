@@ -51,6 +51,32 @@ def _distribute_evenly(total: int, n: int) -> list[int]:
     return [base + 1 if i < remainder else base for i in range(n)]
 
 
+def _distribute_with_caps(total: int, caps: list[int]) -> list[int]:
+    # Water-filling NHIỀU VÒNG, biết trước cap thật (số candidate thật) của MỌI nguồn.
+    # Mỗi vòng chia đều ngân sách còn lại cho các nguồn chưa "khóa"; nguồn nào có cap thấp
+    # hơn phần chia đều thì khóa quota đúng bằng cap của nó, ngân sách dư (quota - cap) dồn
+    # tiếp cho các nguồn còn lại ở vòng sau — lặp đến khi hết ngân sách hoặc hết nguồn.
+    # Khác thuật toán 1 vòng cũ (chỉ dồn ngân sách cho nguồn xử lý SAU trong lúc crawl): vì
+    # biết cap thật của mọi nguồn ngay từ đầu, thuật toán này bù đúng cả khi nguồn thiếu
+    # candidate nằm ở CUỐI danh sách (bug thật gặp 2026-07-13 — xem CLAUDE.md).
+    n = len(caps)
+    quotas = [0] * n
+    remaining_indices = list(range(n))
+    remaining_budget = total
+    while remaining_indices and remaining_budget > 0:
+        shares = _distribute_evenly(remaining_budget, len(remaining_indices))
+        newly_capped = [idx for pos, idx in enumerate(remaining_indices) if shares[pos] > caps[idx]]
+        if not newly_capped:
+            for pos, idx in enumerate(remaining_indices):
+                quotas[idx] = shares[pos]
+            break
+        for idx in newly_capped:
+            quotas[idx] = caps[idx]
+            remaining_budget -= caps[idx]
+        remaining_indices = [idx for idx in remaining_indices if idx not in newly_capped]
+    return quotas
+
+
 def _crawl_sources(db, job: Job) -> None:
     delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
     max_articles = _parse_max_articles(os.environ.get("MAX_ARTICLES_PER_JOB"))
@@ -70,28 +96,41 @@ def _crawl_sources(db, job: Job) -> None:
     def source_crawled_count(source_id) -> int:
         return db.query(Article).filter_by(job_id=job.job_id, source_id=source_id).count()
 
-    num_sources = len(job.source_ids)
-    for idx, source_id in enumerate(job.source_ids):
+    sources = [db.get(Source, source_id) for source_id in job.source_ids]
+
+    # Chỉ cần biết trước cap thật (số candidate thật) của MỌI nguồn khi bật water-filling
+    # nhiều vòng (even_distribute + có max_articles) — xem _distribute_with_caps. Các trường
+    # hợp khác giữ nguyên hành vi fetch "lười" cũ (không fetch nguồn sau nếu nguồn trước đã
+    # đủ quota) để không tốn request thừa khi tính năng bù quota không cần dùng tới.
+    quota_by_source: dict = {}
+    prefetched: dict = {}
+    if even_distribute and max_articles is not None:
+        caps = []
+        for source in sources:
+            try:
+                candidates, failed_locs = _get_candidates(source, job.date_from, job.date_to)
+            except Exception:
+                logger.exception("Lỗi lấy danh sách bài viết cho nguồn %s", source.domain)
+                candidates, failed_locs = [], []
+            prefetched[source.source_id] = (candidates, failed_locs)
+            caps.append(len(candidates))
+        quotas = _distribute_with_caps(max_articles, caps)
+        quota_by_source = {s.source_id: q for s, q in zip(sources, quotas)}
+
+    for source in sources:
         if max_articles is not None and crawled_count() >= max_articles:
             break
 
-        # Water-filling: tính lại quota của nguồn này ngay trước khi xử lý, dựa trên ngân
-        # sách CÒN LẠI thật (đã trừ những gì các nguồn trước đã crawl được) chia cho số
-        # nguồn CHƯA xử lý (gồm cả nguồn hiện tại) — không dùng quota cố định tính 1 lần
-        # trước loop. Nhờ vậy, nguồn nào thiếu bài (VD không có bài đăng đúng ngày yêu cầu)
-        # sẽ tự động "nhường" phần ngân sách chưa dùng cho các nguồn sau, thay vì bỏ phí.
-        quota_for_source: int | None = None
-        if even_distribute and max_articles is not None:
-            remaining_budget = max_articles - crawled_count()
-            remaining_sources = num_sources - idx
-            quota_for_source = _distribute_evenly(remaining_budget, remaining_sources)[0]
+        quota_for_source: int | None = quota_by_source.get(source.source_id) if quota_by_source else None
 
-        source = db.get(Source, source_id)
-        try:
-            candidates, failed_locs = _get_candidates(source, job.date_from, job.date_to)
-        except Exception:
-            logger.exception("Lỗi lấy danh sách bài viết cho nguồn %s", source.domain)
-            continue
+        if source.source_id in prefetched:
+            candidates, failed_locs = prefetched[source.source_id]
+        else:
+            try:
+                candidates, failed_locs = _get_candidates(source, job.date_from, job.date_to)
+            except Exception:
+                logger.exception("Lỗi lấy danh sách bài viết cho nguồn %s", source.domain)
+                continue
 
         for loc in failed_locs:
             db.add(

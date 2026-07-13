@@ -8,7 +8,12 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.crawler.article import compute_url_hash
 from backend.models import Article, ArticleAnalysis, Job, Source
-from backend.workers.report_job import _analyze_articles, _crawl_sources, _distribute_evenly
+from backend.workers.report_job import (
+    _analyze_articles,
+    _crawl_sources,
+    _distribute_evenly,
+    _distribute_with_caps,
+)
 
 
 def test_distribute_evenly_splits_remainder_to_first_sources():
@@ -25,6 +30,24 @@ def test_distribute_evenly_allows_zero_quota_when_fewer_articles_than_sources():
 
 def test_distribute_evenly_single_source_gets_everything():
     assert _distribute_evenly(7, 1) == [7]
+
+
+def test_distribute_with_caps_matches_even_split_when_no_cap_binds():
+    assert _distribute_with_caps(5, [4, 4, 4]) == [2, 2, 1]
+
+
+def test_distribute_with_caps_compensates_shortfall_from_early_source():
+    assert _distribute_with_caps(5, [1, 4, 4]) == [1, 2, 2]
+
+
+def test_distribute_with_caps_compensates_shortfall_from_last_source():
+    # Bug thật đã gặp: nguồn thiếu candidate (cap=0) nằm ở CUỐI danh sách — thuật toán 1
+    # vòng cũ không bù được vì không còn nguồn nào phía sau để nhận lại ngân sách dư.
+    assert _distribute_with_caps(5, [1192, 36360, 0]) == [3, 2, 0]
+
+
+def test_distribute_with_caps_never_exceeds_total_articles():
+    assert sum(_distribute_with_caps(5, [1, 1, 0])) == 2
 
 
 def test_crawl_sources_stops_at_max_articles_per_job_limit(db_session, monkeypatch):
@@ -895,6 +918,64 @@ def test_crawl_sources_compensates_shortfall_from_earlier_sources(db_session, mo
         assert count_b == 2  # nhận quota được tính lại sau khi A thiếu hụt
         assert count_c == 2  # nhận quota được tính lại sau khi A thiếu hụt
         assert total == 5  # đạt đúng MAX_ARTICLES_PER_JOB nhờ bù quota
+    finally:
+        db_session.query(Article).filter_by(job_id=job.job_id).delete()
+        db_session.delete(job)
+        db_session.delete(source_a)
+        db_session.delete(source_b)
+        db_session.delete(source_c)
+        db_session.commit()
+
+
+def test_crawl_sources_compensates_shortfall_from_last_source(db_session, monkeypatch):
+    monkeypatch.setenv("MAX_ARTICLES_PER_JOB", "5")
+    monkeypatch.setenv("EVEN_DISTRIBUTE_ACROSS_SOURCES", "true")
+
+    source_a = Source(name="A", domain=f"a-{uuid.uuid4()}.example", group_name="A", parsing_rules={})
+    source_b = Source(name="B", domain=f"b-{uuid.uuid4()}.example", group_name="B", parsing_rules={})
+    source_c = Source(name="C", domain=f"c-{uuid.uuid4()}.example", group_name="C", parsing_rules={})
+    db_session.add_all([source_a, source_b, source_c])
+    db_session.flush()
+
+    job = Job(
+        source_ids=[source_a.source_id, source_b.source_id, source_c.source_id],
+        date_from=date(2026, 6, 1), date_to=date(2026, 6, 30),
+    )
+    db_session.add(job)
+    db_session.flush()
+
+    # Nguồn C (xử lý CUỐI CÙNG) không có candidate nào — tái hiện đúng bug thật (2026-07-13):
+    # thuật toán 1 vòng cũ chốt quota A=B=2 trước khi biết C hụt, nên tổng job chỉ đạt 4/5.
+    # Thuật toán 2 vòng phải biết trước cap thật của MỌI nguồn để bù đúng cho A/B dù C ở cuối.
+    def fake_get_article_urls(source, date_from, date_to):
+        if source.source_id == source_c.source_id:
+            return ([], [])
+        return (
+            [{"url": f"https://{source.domain}/a-{i}", "lastmod": date(2026, 6, 1)} for i in range(4)],
+            [],
+        )
+
+    def fake_fetch_article_dispatch(url, parsing_rules, **kwargs):
+        return {
+            "url": url, "url_hash": f"hash-{url}", "title": "Title", "content_raw": "Content",
+            "author": None, "published_at": None, "crawl_duration_seconds": 0.01,
+        }
+
+    try:
+        with patch("backend.workers.report_job.get_article_urls", side_effect=fake_get_article_urls), patch(
+            "backend.workers.report_job.fetch_article_dispatch", side_effect=fake_fetch_article_dispatch
+        ), patch("backend.workers.report_job.time.sleep"):
+            _crawl_sources(db_session, job)
+
+        count_a = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_a.source_id).count()
+        count_b = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_b.source_id).count()
+        count_c = db_session.query(Article).filter_by(job_id=job.job_id, source_id=source_c.source_id).count()
+        total = db_session.query(Article).filter_by(job_id=job.job_id).count()
+
+        assert count_c == 0  # thiếu hụt thật (không có candidate)
+        assert count_a == 3  # nhận quota được bù ngay từ đầu (biết trước C hụt)
+        assert count_b == 2
+        assert total == 5  # đạt đúng MAX_ARTICLES_PER_JOB dù nguồn hụt nằm ở cuối danh sách
     finally:
         db_session.query(Article).filter_by(job_id=job.job_id).delete()
         db_session.delete(job)
