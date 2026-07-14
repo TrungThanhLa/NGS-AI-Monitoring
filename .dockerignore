@@ -1,0 +1,9 @@
+.git
+**/node_modules
+**/dist
+**/.next
+docs
+ngs-monitoring-ui
+storage
+*.docx
+*.md
