@@ -8,3 +8,6 @@ __pycache__/
 
 node_modules/
 .next/
+vite.config.d.ts
+vite.config.js
+*.tsbuildinfo
