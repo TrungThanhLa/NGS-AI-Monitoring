@@ -6,6 +6,10 @@ export default function SystemSettingsPage() {
   return (
     <div>
       <Typography.Title level={3}>Tham số hệ thống</Typography.Title>
+      <Typography.Paragraph type="secondary">
+        Các tham số dưới đây chỉ là dữ liệu minh hoạ giao diện — hệ thống chưa lưu/áp dụng
+        được thật.
+      </Typography.Paragraph>
       <Card>
         <Form layout="vertical">
           <Form.Item label="Số lần đăng nhập sai tối đa">

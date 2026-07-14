@@ -28,6 +28,7 @@ export default function ContentsPage() {
   return (
     <MockStatPage<ContentRow>
       title="Nội dung thu thập"
+      description="Trang này minh hoạ giao diện kho nội dung — dữ liệu mẫu, chưa nối với dữ liệu `articles` thật."
       stats={[
         { title: "Tổng nội dung", value: 128456 },
         { title: "Hôm nay", value: 2845 },

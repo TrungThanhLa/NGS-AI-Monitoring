@@ -18,6 +18,7 @@ export default function AlertRulesPage() {
   return (
     <MockStatPage<RuleRow>
       title="Cấu hình cảnh báo"
+      description="Trang này chỉ minh hoạ giao diện — hệ thống chưa có cơ chế cấu hình cảnh báo thật."
       rowKey="id"
       dataSource={data}
       columns={[

@@ -28,6 +28,7 @@ export default function CasesPage() {
   return (
     <MockStatPage<CaseRow>
       title="Vụ việc"
+      description="Hệ thống hiện tại chưa có Case Management thật — trang này chỉ minh hoạ giao diện."
       stats={[{ title: "Vụ việc đang xử lý", value: 27 }]}
       rowKey="id"
       dataSource={data}

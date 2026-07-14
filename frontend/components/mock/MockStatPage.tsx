@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, Col, Row, Statistic, Table, Typography, Tag } from "antd";
+import { Card, Col, Row, Statistic, Table, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 
 export type StatItem = {
@@ -54,5 +54,3 @@ export default function MockStatPage<T extends object>({
     </div>
   );
 }
-
-export { Tag };

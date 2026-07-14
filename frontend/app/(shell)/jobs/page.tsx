@@ -27,6 +27,7 @@ export default function JobsPage() {
   return (
     <MockStatPage<JobRow>
       title="Lịch chạy & Jobs"
+      description="Trang này minh hoạ giao diện Lịch chạy & Jobs — dữ liệu mẫu, chưa nối với bảng `jobs` thật trong DB."
       rowKey="id"
       dataSource={data}
       columns={[

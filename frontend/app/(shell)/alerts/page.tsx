@@ -28,6 +28,7 @@ export default function AlertsPage() {
   return (
     <MockStatPage<AlertRow>
       title="Cảnh báo"
+      description="Hệ thống hiện tại chưa có Alert Center thật — trang này chỉ minh hoạ giao diện."
       stats={[{ title: "Cảnh báo mới", value: 18 }]}
       rowKey="id"
       dataSource={data}

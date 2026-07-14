@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Table, Tag, Button, Typography } from "antd";
+import { Table, Tag, Button } from "antd";
 import { API_BASE } from "@/lib/api";
 
 type HistoryEntry = {
@@ -14,8 +14,6 @@ type HistoryEntry = {
   job_status: string;
   source_names: string[];
 };
-
-export type ReportHistoryTableHandle = { reload: () => void };
 
 export default function ReportHistoryTable({ reloadToken }: { reloadToken: number }) {
   const [history, setHistory] = useState<HistoryEntry[]>([]);

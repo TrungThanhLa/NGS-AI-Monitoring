@@ -29,6 +29,7 @@ export default function CampaignsPage() {
   return (
     <MockStatPage<Campaign>
       title="Chiến dịch giám sát"
+      description="Hệ thống hiện tại chưa có khái niệm 'chiến dịch giám sát' — trang này chỉ minh hoạ giao diện."
       stats={[
         { title: "Tổng chiến dịch", value: data.length },
         { title: "Đang chạy", value: data.filter((c) => c.status === "Đang chạy").length },
