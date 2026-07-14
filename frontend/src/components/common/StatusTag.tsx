@@ -19,9 +19,8 @@ const CONTENT_STATUS: Record<string, { color: string; label: string }> = {
 }
 
 const ALERT_STATUS: Record<string, { color: string; label: string }> = {
-  NEW: { color: 'error', label: 'Mới' },
-  ACKNOWLEDGED: { color: 'warning', label: 'Đã nhận' },
-  PROCESSING: { color: 'processing', label: 'Đang xử lý' },
+  OPEN: { color: 'error', label: 'Mới' },
+  IN_PROGRESS: { color: 'processing', label: 'Đang xử lý' },
   RESOLVED: { color: 'success', label: 'Đã giải quyết' },
   CLOSED: { color: 'default', label: 'Đã đóng' },
 }
@@ -29,6 +28,7 @@ const ALERT_STATUS: Record<string, { color: string; label: string }> = {
 const CASE_STATUS: Record<string, { color: string; label: string }> = {
   OPEN: { color: 'error', label: 'Mở' },
   INVESTIGATING: { color: 'processing', label: 'Đang điều tra' },
+  CONCLUDED: { color: 'success', label: 'Đã kết luận' },
   RESOLVED: { color: 'success', label: 'Đã giải quyết' },
   CLOSED: { color: 'default', label: 'Đã đóng' },
 }
