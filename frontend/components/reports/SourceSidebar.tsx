@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Input, Checkbox, Tag, Typography } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import { SearchOutlined, CloseOutlined } from "@ant-design/icons";
 
 export type SourceItem = {
   source_id: string;
@@ -51,7 +51,13 @@ export default function SourceSidebar({ sources, selectedIds, onToggle }: Props)
       {selectedSources.length > 0 && (
         <div style={{ marginBottom: 12 }}>
           {selectedSources.map((s) => (
-            <Tag key={s.source_id} closable onClose={() => onToggle(s.source_id)} color="blue">
+            <Tag
+              key={s.source_id}
+              closable
+              onClose={() => onToggle(s.source_id)}
+              color="blue"
+              closeIcon={<CloseOutlined aria-label={`Bỏ chọn ${s.name}`} />}
+            >
               {s.name}
             </Tag>
           ))}
