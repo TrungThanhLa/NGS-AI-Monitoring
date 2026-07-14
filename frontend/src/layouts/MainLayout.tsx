@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Layout, Menu, Avatar, Badge, Typography, Space, Button } from "antd";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import Logo from "@/components/common/Logo";
 import {
   DashboardOutlined,
   RadarChartOutlined,
@@ -101,46 +102,7 @@ export default function MainLayout() {
             flexShrink: 0,
           }}
         >
-          {!collapsed ? (
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 8,
-                padding: "6px 12px",
-                display: "flex",
-                alignItems: "center",
-                maxWidth: "100%",
-              }}
-            >
-              <img src="/logo.jpg" alt="NGS" style={{ height: 40, width: "auto", display: "block" }} />
-            </div>
-          ) : (
-            <div
-              style={{
-                background: "#fff",
-                borderRadius: 8,
-                width: 44,
-                height: 44,
-                overflow: "hidden",
-                flexShrink: 0,
-                display: "flex",
-                alignItems: "center",
-              }}
-            >
-              <img
-                src="/logo.jpg"
-                alt="NGS"
-                style={{
-                  height: "220%",
-                  width: "auto",
-                  maxWidth: "none",
-                  objectFit: "cover",
-                  objectPosition: "left top",
-                  display: "block",
-                }}
-              />
-            </div>
-          )}
+          <Logo collapsed={collapsed} />
         </div>
 
         <div style={{ overflowY: "auto", overflowX: "hidden", flex: 1, height: "calc(100vh - 72px)" }} className="ngs-sidebar-scroll">
