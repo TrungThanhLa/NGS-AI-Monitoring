@@ -382,7 +382,7 @@ export const permissions = [
 ]
 
 // ─── Connectors ───────────────────────────────────────────────────────────────
-export const connectors: any[] = [
+export const connectors = [
   {
     id: 'conn-website', platform: 'WEBSITE', name: 'Website Connector',
     method: 'Requests / BeautifulSoup', status: 'ACTIVE',
@@ -451,7 +451,7 @@ export const connectors: any[] = [
 
 // ─── Connector Sources (derived from 40 real sources) ────────────────────────
 // Maps the sources array into connector-source format for the split-panel UI
-export const connectorSources: any[] = sources.map(s => ({
+export const connectorSources = sources.map(s => ({
   id: `cs-${s.id}`,
   source_id: s.id,
   name: s.name,
