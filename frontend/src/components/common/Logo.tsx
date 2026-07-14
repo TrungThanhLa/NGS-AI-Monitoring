@@ -6,20 +6,13 @@ type Props = {
 // khác bản .jpg dùng trước đó có nền trắng đặc). Render inline SVG (không phải <img>)
 // để có thể đổi màu tagline — bản gốc dùng #0B2262 (navy đậm) gần trùng màu nền sidebar
 // tối (#0A1D55), không đọc được nếu giữ nguyên.
-export default function Logo({ collapsed }: Props) {
-  if (collapsed) {
-    return (
-      <svg width={36} height={36} viewBox="0 0 158 136" xmlns="http://www.w3.org/2000/svg">
-        <polygon points="4,8 158,8 140,128 0,128" fill="#0B2262" />
-        <text x="22" y="110" fontFamily="'Arial Black','Arial'" fontWeight={900} fontSize={108} fontStyle="italic" fill="#FFFFFF">
-          N
-        </text>
-      </svg>
-    );
-  }
-
+//
+// Khối màu + 3 chữ N/G/S dùng chung giữa 2 trạng thái — chỉ khác viewBox (thu gọn cắt bỏ
+// tagline + dấu ®) và kích thước hiển thị (width/height tính đúng theo tỉ lệ viewBox,
+// tránh bị méo/nhỏ hơn dự kiến do preserveAspectRatio mặc định của SVG).
+function Blocks() {
   return (
-    <svg width={172} height={40} viewBox="0 0 520 210" xmlns="http://www.w3.org/2000/svg">
+    <>
       <polygon points="4,8 158,8 140,128 0,128" fill="#0B2262" />
       <polygon points="165,8 318,8 300,128 148,128" fill="#8C95A0" />
       <polygon points="325,8 478,8 460,128 308,128" fill="#00859A" />
@@ -34,6 +27,31 @@ export default function Logo({ collapsed }: Props) {
       <text x="334" y="110" fontFamily="'Arial Black','Arial'" fontWeight={900} fontSize={108} fontStyle="italic" fill="#FFFFFF">
         S
       </text>
+    </>
+  );
+}
+
+export default function Logo({ collapsed }: Props) {
+  if (collapsed) {
+    // Cắt viewBox chỉ lấy phần 3 khối N/G/S (bỏ dấu ® + tagline — không đủ chỗ khi thu gọn)
+    const viewBoxWidth = 492;
+    const viewBoxHeight = 136;
+    const height = 26;
+    const width = Math.round((height * viewBoxWidth) / viewBoxHeight);
+    return (
+      <svg width={width} height={height} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`} xmlns="http://www.w3.org/2000/svg">
+        <Blocks />
+      </svg>
+    );
+  }
+
+  const viewBoxWidth = 520;
+  const viewBoxHeight = 210;
+  const height = 64;
+  const width = Math.round((height * viewBoxWidth) / viewBoxHeight);
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`} xmlns="http://www.w3.org/2000/svg">
+      <Blocks />
 
       <text x="474" y="34" fontFamily="Arial" fontSize={22} fill="#00859A">
         ®

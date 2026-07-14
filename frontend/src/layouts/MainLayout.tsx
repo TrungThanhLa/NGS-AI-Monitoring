@@ -86,6 +86,7 @@ export default function MainLayout() {
       <Sider
         collapsible
         collapsed={collapsed}
+        collapsedWidth={80}
         trigger={null}
         width={240}
         style={{ background: "#0A1D55", position: "fixed", height: "100vh", left: 0, top: 0, zIndex: 100, display: "flex", flexDirection: "column" }}

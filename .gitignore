@@ -12,3 +12,5 @@ frontend/dist/
 vite.config.d.ts
 vite.config.js
 *.tsbuildinfo
+
+ngs-monitoring-ui/
