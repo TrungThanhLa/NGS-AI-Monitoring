@@ -13,6 +13,27 @@ import type { MenuProps } from "antd";
 
 export type MenuItem = Required<MenuProps>["items"][number];
 
+// Map route -> tiêu đề hiển thị ở breadcrumb header (AppShell.tsx), tách riêng khỏi
+// sidebarItems vì label trong Menu item là JSX/ReactNode, còn breadcrumb cần chuỗi thuần.
+export const pageTitles: Record<string, string> = {
+  "/dashboard": "Tổng quan",
+  "/campaigns": "Chiến dịch giám sát",
+  "/sources": "Nguồn dữ liệu",
+  "/contents": "Nội dung",
+  "/alerts": "Cảnh báo",
+  "/cases": "Vụ việc",
+  "/reports": "Báo cáo",
+  "/jobs": "Lịch chạy & Jobs",
+  "/system": "Cấu hình hệ thống",
+  "/system/master-data": "Dữ liệu dùng chung",
+  "/system/users": "Người dùng & phân quyền",
+  "/system/audit-logs": "Nhật ký hệ thống",
+  "/system/alert-rules": "Cấu hình cảnh báo",
+  "/system/crawler-settings": "Cấu hình Crawler",
+  "/system/report-settings": "Cấu hình báo cáo",
+  "/system/settings": "Tham số hệ thống",
+};
+
 export const sidebarItems: MenuItem[] = [
   { key: "/dashboard", icon: <HomeOutlined />, label: "Tổng quan" },
   { key: "/campaigns", icon: <AimOutlined />, label: "Chiến dịch giám sát" },

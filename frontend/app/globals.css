@@ -1,3 +1,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Tailwind preflight bị tắt (xung đột CSS reset với AntD) nên trình duyệt vẫn áp
+   margin/padding mặc định của user-agent stylesheet cho html/body — gây lệch layout
+   + xuất hiện thanh scroll thừa ở toàn bộ trang. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}

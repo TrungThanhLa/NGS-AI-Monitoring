@@ -8,3 +8,7 @@ __pycache__/
 
 node_modules/
 .next/
+
+# Project tham khảo UI bên thứ 3 — không phải code NGS Monitor
+ngs-monitoring-ui/
+*.tsbuildinfo
