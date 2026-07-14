@@ -7,7 +7,7 @@ import { API_BASE } from "@/lib/api";
 import SourceSidebar, { SourceItem } from "./SourceSidebar";
 import SummaryCard from "./SummaryCard";
 
-const JOB_ID_STORAGE_KEY = "ngs_monitor_job_id";
+export const JOB_ID_STORAGE_KEY = "ngs_monitor_job_id";
 
 const DATE_PRESETS = [
   { label: "Hôm nay", days: 0 },

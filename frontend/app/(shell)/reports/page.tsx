@@ -1,14 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button, Card, Typography } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
-import CreateReportModal from "@/components/reports/CreateReportModal";
+import CreateReportModal, { JOB_ID_STORAGE_KEY } from "@/components/reports/CreateReportModal";
 import ReportHistoryTable from "@/components/reports/ReportHistoryTable";
 
 export default function ReportsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+
+  // Nếu còn job_id trong sessionStorage (job đang chạy trước khi F5) — tự mở lại modal
+  // ngay khi vào trang, để người dùng thấy trạng thái job + nút Cancel mà không cần
+  // tự bấm "Tạo báo cáo" (khôi phục hành vi F5 của bản cũ trước khi tách sang Modal)
+  useEffect(() => {
+    if (sessionStorage.getItem(JOB_ID_STORAGE_KEY)) {
+      setModalOpen(true);
+    }
+  }, []);
 
   return (
     <div>
