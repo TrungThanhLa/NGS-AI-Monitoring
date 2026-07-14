@@ -63,9 +63,22 @@ export default function MainLayout() {
     return match ? [match] : [path];
   })();
 
-  const openKeys = MENU_ITEMS.filter(
-    (m) => m.children?.some((c) => (c.children ? c.children.some((cc) => location.pathname.startsWith(cc.key)) : location.pathname.startsWith(c.key)))
-  ).map((m) => m.key);
+  const openKeys = (() => {
+    const keys: string[] = [];
+    for (const m of MENU_ITEMS) {
+      if (!m.children) continue;
+      for (const c of m.children) {
+        const childMatches = c.children
+          ? c.children.some((cc) => location.pathname.startsWith(cc.key))
+          : location.pathname.startsWith(c.key);
+        if (childMatches) {
+          keys.push(m.key);
+          if (c.children) keys.push(c.key);
+        }
+      }
+    }
+    return keys;
+  })();
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
