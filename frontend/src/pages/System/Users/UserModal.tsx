@@ -71,8 +71,8 @@ const PERM_TREE: PermNode[] = [
 const ROLE_PERMS: Record<string, string[]> = {
   ADMIN:   ['dashboard','source','content','alert','report','system','system.masterdata','system.users','system.users.roles','system.users.audit','system.alert_config','system.crawler','system.connector','system.report','system.settings'],
   EDITOR:  ['dashboard','source','content','report'],
-  MONITOR: ['dashboard','source','content','alert','report'],
-  STAFF:   ['dashboard','content'],
+  VIEWER:  ['dashboard','source','content','alert','report'],
+  AUDITOR: ['dashboard','content'],
 }
 
 const DEPT_OPTIONS = [

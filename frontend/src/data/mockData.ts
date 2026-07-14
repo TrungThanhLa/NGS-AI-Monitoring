@@ -140,8 +140,8 @@ export const roles = [
 const ROLES = {
   ADMIN:    { id: 'r-1', code: 'ADMIN',    name: 'Quản trị hệ thống' },
   EDITOR:   { id: 'r-2', code: 'EDITOR',   name: 'Biên tập viên' },
-  MONITOR:  { id: 'r-3', code: 'MONITOR',  name: 'Giám sát viên' },
-  STAFF:    { id: 'r-4', code: 'STAFF',    name: 'Nhân viên' },
+  MONITOR:  { id: 'r-3', code: 'VIEWER',   name: 'Người xem' },
+  STAFF:    { id: 'r-4', code: 'AUDITOR',  name: 'Kiểm duyệt viên' },
 }
 
 export const users = [

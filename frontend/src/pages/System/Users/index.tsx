@@ -25,8 +25,8 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
 const ROLE_COLOR: Record<string, string> = {
   ADMIN:   '#00859A',
   EDITOR:  '#1677ff',
-  MONITOR: '#fa8c16',
-  STAFF:   '#722ed1',
+  VIEWER:  '#fa8c16',
+  AUDITOR: '#722ed1',
 }
 
 function UserAvatar({ user }: { user: UserRow }) {
@@ -207,8 +207,8 @@ export default function UsersPage() {
               { value: '',        label: 'Nhóm quyền: Tất cả' },
               { value: 'ADMIN',   label: 'Quản trị hệ thống' },
               { value: 'EDITOR',  label: 'Biên tập viên' },
-              { value: 'MONITOR', label: 'Giám sát viên' },
-              { value: 'STAFF',   label: 'Nhân viên' },
+              { value: 'VIEWER',  label: 'Người xem' },
+              { value: 'AUDITOR', label: 'Kiểm duyệt viên' },
             ]}
           />
           <Tooltip title="Làm mới">
