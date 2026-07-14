@@ -13,7 +13,7 @@ alwaysApply: true
 | Crawler | httpx + BeautifulSoup + Playwright | Sitemap XML primary, listing page fallback |
 | Crawler (engine tùy chọn) | Crawl4AI (HTTP-only mode) | Bật theo nguồn qua `parsing_rules.engine = "crawl4ai"` — tự nhận diện content, không cần CSS selector tay. Mặc định vẫn httpx (2026-06-29) |
 | AI Runtime | Ollama | Local inference, REST API |
-| AI Model | `qwen3:8b` | Tiếng Việt tốt, chạy CPU-only |
+| AI Model | `qwen3:8b` | Tiếng Việt tốt, chạy CPU-only mặc định — GPU tùy chọn qua `COMPOSE_FILE` trong `.env` (xem dưới), chưa verify bằng GPU thật |
 | NLP phụ trợ | underthesea | Keyword/NER extraction nhanh |
 | Database | PostgreSQL + SQLAlchemy | ORM, migration với Alembic |
 | Sinh DOCX | python-docx | Điền template Word |
@@ -77,6 +77,8 @@ ngs-monitor/
 ├── ollama/
 │   └── entrypoint.sh           # ollama serve + auto-pull OLLAMA_MODEL
 ├── docker-compose.yml
+├── docker-compose.gpu-nvidia.yml # override: bật GPU NVIDIA cho ollama (tùy chọn, xem dưới)
+├── docker-compose.gpu-amd.yml    # override: bật GPU AMD/ROCm cho ollama (tùy chọn, xem dưới)
 ├── .env.example
 └── CLAUDE.md
 ```
@@ -91,3 +93,20 @@ REDIS_URL=redis://localhost:6379/0
 ```
 
 Các biến cấu hình riêng theo từng thành phần (database, crawler, AI, report) xem ở rule tương ứng.
+
+### GPU cho Ollama (tùy chọn, mặc định tắt)
+
+Mặc định `docker-compose.yml` chạy `ollama` CPU-only (không đổi hành vi cũ). Để bật GPU trên
+máy có GPU tương thích, set biến đặc biệt `COMPOSE_FILE` trong `.env` (Docker Compose tự đọc
+biến này từ `.env` để quyết định merge thêm file nào trước khi chạy `docker compose up` —
+không cần đổi lệnh, không cần flag `-f`/`--profile`):
+
+```env
+# NVIDIA (CUDA) — cần cài nvidia-container-toolkit trên host trước
+COMPOSE_FILE=docker-compose.yml:docker-compose.gpu-nvidia.yml
+
+# AMD (ROCm) — cần cài driver ROCm trên host trước; hỗ trợ hạn chế trên Windows/WSL2
+COMPOSE_FILE=docker-compose.yml:docker-compose.gpu-amd.yml
+```
+
+Không set `COMPOSE_FILE` (hoặc để trống) = giữ nguyên CPU-only như trước đây.
