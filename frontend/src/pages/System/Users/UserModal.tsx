@@ -69,10 +69,16 @@ const PERM_TREE: PermNode[] = [
 ]
 
 const ROLE_PERMS: Record<string, string[]> = {
-  ADMIN:   ['dashboard','source','content','alert','report','system','system.masterdata','system.users','system.users.roles','system.users.audit','system.alert_config','system.crawler','system.connector','system.report','system.settings'],
-  EDITOR:  ['dashboard','source','content','report'],
-  VIEWER:  ['dashboard','source','content','alert','report'],
-  AUDITOR: ['dashboard','content'],
+  ADMIN:    ['dashboard','source','content','alert','report','system','system.masterdata','system.users','system.users.roles','system.users.audit','system.alert_config','system.crawler','system.connector','system.report','system.settings'],
+  EDITOR:   ['dashboard','source','content','report'],
+  VIEWER:   ['dashboard','source','content','alert','report'],
+  AUDITOR:  ['dashboard','content'],
+  // OPERATOR (Nhân viên vận hành — theo dõi hệ thống, xử lý cảnh báo): quyền tập trung vào
+  // theo dõi nguồn/cảnh báo + cấu hình crawler, không có quyền quản trị người dùng/hệ thống
+  OPERATOR: ['dashboard','source','alert','system','system.crawler','system.alert_config'],
+  // GUEST (Khách — truy cập giới hạn): cố ý để mảng rỗng tường minh, KHÔNG dựa vào fallback
+  // `?? []` — xem review Task 11 (ROLE_PERMS thiếu entry cho OPERATOR/GUEST)
+  GUEST:    [],
 }
 
 const DEPT_OPTIONS = [
@@ -311,21 +317,34 @@ export default function UserModal({ open, editId, onClose, onSavedAndNew }: Prop
   const user = isEdit ? mockUsers.find((u) => u.id === editId) : undefined
   const roles = mockRoles
 
+  // Hợp nhất (union) quyền của tất cả vai trò đã chọn — 1 người dùng có thể có nhiều vai trò
+  // (UserForm.tsx dùng Select mode="multiple", UserModal.tsx trước đây chỉ hỗ trợ 1 vai trò —
+  // xem review Task 11). Vai trò không có entry trong ROLE_PERMS bị bỏ qua an toàn (không throw).
+  const unionPerms = (roleIds: string[]): string[] => {
+    const merged = new Set<string>()
+    roleIds.forEach((id) => {
+      const code = roles.find((r) => r.id === id)?.code
+      if (!code) return
+      ;(ROLE_PERMS[code] ?? []).forEach((k) => merged.add(k))
+    })
+    return [...merged]
+  }
+
   useEffect(() => {
     if (!open) return
     if (user && isEdit) {
+      const roleIds = user.roles?.map((r) => r.id) ?? []
       form.setFieldsValue({
         full_name:  user.full_name,
         username:   user.username,
         email:      user.email,
         phone:      user.phone ?? '',
         status:     user.status === 'ACTIVE',
-        role_ids:   user.roles?.[0]?.id ?? undefined,
+        role_ids:   roleIds,
         send_email: true,
       })
       setAvatarUrl('')
-      const roleCode = user.roles?.[0]?.code ?? ''
-      setCheckedPerms(ROLE_PERMS[roleCode] ?? [])
+      setCheckedPerms(unionPerms(roleIds))
     } else {
       form.resetFields()
       form.setFieldsValue({ status: true, send_email: true })
@@ -334,9 +353,8 @@ export default function UserModal({ open, editId, onClose, onSavedAndNew }: Prop
     }
   }, [open, user, isEdit, form])
 
-  const handleRoleChange = (roleId: string) => {
-    const role = roles.find((r) => r.id === roleId)
-    setCheckedPerms(ROLE_PERMS[role?.code ?? ''] ?? [])
+  const handleRoleChange = (roleIds: string[]) => {
+    setCheckedPerms(unionPerms(roleIds))
   }
 
   const fullName = Form.useWatch('full_name', form) ?? ''
@@ -488,6 +506,7 @@ export default function UserModal({ open, editId, onClose, onSavedAndNew }: Prop
           rules={[{ required: true, message: 'Chọn nhóm quyền' }]}
         >
           <Select
+            mode="multiple"
             placeholder="Chọn nhóm quyền"
             options={roles.map((r) => ({ value: r.id, label: r.name }))}
             onChange={handleRoleChange}
