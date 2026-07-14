@@ -40,10 +40,15 @@ alwaysApply: false
 
 ---
 
-## Trạng thái thật đã code (Slice 1 + mở rộng) — khác mockup trên
+## Trạng thái thật đã code (sau migration Vite, `feature/vite-ui-migration`, 2026-07-15) — khác mockup trên
 
-Mockup trên là thiết kế đích cho Slice 2 (nhiều nguồn, sidebar đầy đủ). Slice 1 hiện tại (`frontend/app/page.tsx`) chỉ là **form tối giản** theo đúng phạm vi roadmap Slice 1 (1 nguồn VTV hardcode), nhưng đã code thêm các phần sau (branch `feature/live-crawl-cancel-benchmark`, chưa merge `main`):
+Frontend đã chuyển toàn bộ từ Next.js sang **Vite + React + AntD**, port nguyên giao diện từ
+project tham khảo `ngs-monitoring-ui` (xem CLAUDE.md "Quyết định quan trọng"). Layout thật hiện
+là sidebar 9 mục (menu 2 cấp cho "Cấu hình hệ thống") thay vì single-page như mockup ASCII trên
+— chỉ 2 trang có logic thật, còn lại là mock UI-only:
 
-- **Bảng crawl trực tiếp**: cập nhật theo cùng nhịp polling 3s, hiển thị danh sách bài đã crawl (link mở bài thật để tự kiểm chứng) kèm 3 cột benchmark thời gian (`crawl_duration_seconds`/`analysis_duration_seconds`/`total_duration_seconds`, gọi `GET /api/reports/{job_id}/articles`). Bài lỗi (`status="error"`) hiện URL thay tên vì không có title.
-- **Nút "Cancel"**: hiện khi `status` là `pending`/`running`, gọi `POST /api/reports/{job_id}/cancel`.
-- **Khôi phục sau reload (F5)**: `job_id` lưu vào `sessionStorage` lúc tạo job, tự đọc lại lúc mount để dựng lại đúng UI (bảng, nút Cancel, link download) — vì job chạy nền độc lập FE, reload trước đây làm mất hết khả năng theo dõi/hủy job dù job thật vẫn đang chạy.
+- **`/sources`** (`frontend/src/pages/Sources/index.tsx`) — THẬT, gọi `GET /api/sources`
+- **`/reports`** (`frontend/src/pages/Reports/index.tsx`) — THẬT, danh sách báo cáo (`GET /api/reports/history`)
+- **`/reports/create`** (`frontend/src/pages/Reports/ReportCreate.tsx`) — THẬT, tách riêng khỏi trang list (không còn modal). Vẫn giữ đúng logic sidebar chọn nguồn (`SourceSidebar.tsx`) + summary card ước tính (`SummaryCard.tsx`) khớp mockup ASCII trên — tạo job qua `POST /api/reports/create`, polling status, bảng crawl trực tiếp, nút Cancel, khôi phục sau F5 qua `sessionStorage` như trước
+- **Mọi trang khác** (Dashboard, Campaigns, Contents, Alerts, Cases, Jobs, System/*) — mock UI-only, dữ liệu lấy từ `frontend/src/data/mockData.ts`, không gọi API thật. Không dùng `@tanstack/react-query`/`zustand`/`msw` — chỉ `fetch` thuần + `useState`
+- Không còn trang Login/Profile — bỏ toàn bộ Auth theo quyết định phạm vi migration

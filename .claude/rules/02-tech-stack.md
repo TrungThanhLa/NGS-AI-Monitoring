@@ -7,7 +7,7 @@ alwaysApply: true
 
 | Thành phần | Công nghệ | Ghi chú |
 |---|---|---|
-| Frontend | Next.js + Tailwind CSS | Desktop-first, React |
+| Frontend | Vite + React + Ant Design (`antd@^6.5.1`) | Desktop-first, SPA build tĩnh — chuyển từ Next.js sang Vite (2026-07-15, xem CLAUDE.md "Quyết định quan trọng"), không dùng Tailwind |
 | Backend API | Python + FastAPI | REST API, async |
 | Job Queue | Celery + Redis | Background jobs, retry tự động |
 | Crawler | httpx + BeautifulSoup + Playwright | Sitemap XML primary, listing page fallback |
@@ -28,17 +28,20 @@ alwaysApply: true
 
 ```
 ngs-monitor/
-├── frontend/                  # Next.js app (+ tailwind/postcss/tsconfig ở root frontend/)
-│   ├── app/
-│   │   ├── page.tsx           # Màn hình tạo báo cáo (main)
-│   │   ├── history/page.tsx   # Lịch sử báo cáo — Slice 5
-│   │   └── admin/page.tsx     # Admin quản lý nguồn — Slice 6
-│   ├── components/
-│   │   ├── SourceSidebar.tsx  # Sidebar chọn nguồn
-│   │   ├── DatePicker.tsx     # Date range + presets
-│   │   ├── SummaryCard.tsx    # Ước tính số bài & thời gian
-│   │   └── JobStatus.tsx      # Polling + progress
-│   └── Dockerfile
+├── frontend/                  # Vite + React SPA (build tĩnh, serve qua nginx — xem docker-compose.yml)
+│   ├── src/
+│   │   ├── layouts/MainLayout.tsx   # Sider (menu 2 cấp) + Header + Outlet
+│   │   ├── pages/
+│   │   │   ├── Dashboard/           # Tổng quan (mock)
+│   │   │   ├── Sources/             # Nguồn dữ liệu — THẬT, gọi GET /api/sources
+│   │   │   ├── Reports/             # Báo cáo — THẬT, 2 trang (list + create), nối full flow backend
+│   │   │   ├── Campaigns/ Contents/ Alerts/ Cases/ Jobs/  # mock, chỉ hiển thị UI
+│   │   │   └── System/              # Users, Roles, MasterData, Settings, Connectors, AuditLogs — mock
+│   │   ├── components/common/       # StatusTag, Logo... dùng chung
+│   │   ├── data/mockData.ts         # Toàn bộ mock data cho các trang chưa nối backend thật
+│   │   └── theme/                   # ConfigProvider theme AntD
+│   ├── Dockerfile                   # multi-stage: node build → nginx serve
+│   └── nginx.frontend.conf
 │
 ├── backend/                   # FastAPI app
 │   ├── main.py
