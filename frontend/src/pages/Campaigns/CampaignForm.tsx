@@ -1,4 +1,4 @@
-import { Button, Card, DatePicker, Form, Input, Space, message } from 'antd'
+import { App, Button, Card, DatePicker, Form, Input, Space } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
 import { campaigns as mockCampaigns } from '@/data/mockData'
 import PageHeader from '@/components/common/PageHeader'
@@ -10,6 +10,7 @@ export default function CampaignForm() {
   const isEdit = !!id
   const navigate = useNavigate()
   const [form] = Form.useForm()
+  const { message } = App.useApp()
 
   const campaign = isEdit ? mockCampaigns.find((c) => c.id === id) : undefined
 

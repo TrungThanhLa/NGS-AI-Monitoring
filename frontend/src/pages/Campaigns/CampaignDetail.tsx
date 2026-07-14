@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Col, Descriptions, Row, Space, Tag, Select, message, Tabs } from 'antd'
+import { App, Button, Card, Col, Descriptions, Row, Space, Tag, Select, Tabs } from 'antd'
 import { EditOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { campaigns as mockCampaigns, surveyDetail } from '@/data/mockData'
@@ -29,6 +29,7 @@ const STATUS_LABELS: Record<CampaignStatus, string> = {
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { message } = App.useApp()
 
   // surveyDetail có sẵn keywords/sources chi tiết — chỉ campaign đầu tiên (mock) có dữ liệu này,
   // các chiến dịch mock khác trong danh sách chưa có từ khóa/nguồn cụ thể (fallback mảng rỗng)
