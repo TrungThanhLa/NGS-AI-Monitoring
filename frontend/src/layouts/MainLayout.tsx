@@ -94,22 +94,52 @@ export default function MainLayout() {
             height: 72,
             display: "flex",
             alignItems: "center",
-            justifyContent: collapsed ? "center" : "flex-start",
-            padding: collapsed ? 0 : "0 18px",
+            justifyContent: "center",
+            padding: collapsed ? 8 : "0 18px",
             borderBottom: "1px solid rgba(255,255,255,0.1)",
             background: "rgba(0,0,0,0.15)",
             flexShrink: 0,
           }}
         >
           {!collapsed ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
-              <Typography.Text style={{ color: "#fff", fontWeight: 800, fontSize: 22, lineHeight: 1 }}>NGS</Typography.Text>
-              <Typography.Text style={{ color: "rgba(255,255,255,0.55)", fontSize: 10, letterSpacing: 0.5, marginTop: 2 }}>
-                Monitor Platform
-              </Typography.Text>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 8,
+                padding: "6px 12px",
+                display: "flex",
+                alignItems: "center",
+                maxWidth: "100%",
+              }}
+            >
+              <img src="/logo.jpg" alt="NGS" style={{ height: 40, width: "auto", display: "block" }} />
             </div>
           ) : (
-            <Typography.Text style={{ color: "#fff", fontWeight: 800, fontSize: 18 }}>N</Typography.Text>
+            <div
+              style={{
+                background: "#fff",
+                borderRadius: 8,
+                width: 44,
+                height: 44,
+                overflow: "hidden",
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <img
+                src="/logo.jpg"
+                alt="NGS"
+                style={{
+                  height: "220%",
+                  width: "auto",
+                  maxWidth: "none",
+                  objectFit: "cover",
+                  objectPosition: "left top",
+                  display: "block",
+                }}
+              />
+            </div>
           )}
         </div>
 
