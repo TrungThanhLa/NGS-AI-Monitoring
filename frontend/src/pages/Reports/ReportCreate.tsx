@@ -60,6 +60,7 @@ export default function ReportCreate() {
   const [error, setError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     fetch(`${API_BASE}/api/sources`)
@@ -82,6 +83,8 @@ export default function ReportCreate() {
   const parsedDayCount = dateTo.diff(dateFrom, "day");
   const dayCount = Number.isFinite(parsedDayCount) ? Math.max(1, parsedDayCount) : 1;
 
+  // Cập nhật status job + tự dọn sessionStorage khi job đã ở trạng thái kết thúc
+  // (completed/failed/cancelled) — tránh effect khôi phục F5 tìm lại 1 job đã xong.
   function updateStatus(data: JobStatus) {
     setStatus(data);
     if (!["pending", "running"].includes(data.status)) {
@@ -109,49 +112,74 @@ export default function ReportCreate() {
     })();
   }, []);
 
+  // Polling mỗi 3 giây khi job đang pending/running — dừng lại (cleanup) ngay khi
+  // status đổi sang trạng thái không active (completed/failed/cancelled) nhờ dependency
+  // [jobId, status?.status]. Cờ `cancelled` chặn race condition: nếu job bị Cancel
+  // (hoặc effect bị cleanup) ngay lúc 1 request poll đang bay, response cũ (mang trạng
+  // thái lỗi thời) về sau sẽ bị bỏ qua thay vì ghi đè ngược trạng thái mới hơn.
   useEffect(() => {
     const activeStatuses = ["pending", "running"];
     if (!jobId || !status || !activeStatuses.includes(status.status)) return;
+    let cancelled = false;
     const interval = setInterval(async () => {
       const [statusRes, articlesRes] = await Promise.all([
         fetch(`${API_BASE}/api/reports/${jobId}/status`),
         fetch(`${API_BASE}/api/reports/${jobId}/articles`),
       ]);
+      if (cancelled) return;
       if (statusRes.ok) updateStatus(await statusRes.json());
       if (articlesRes.ok) setArticles((await articlesRes.json()).articles);
     }, 3000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [jobId, status?.status]);
 
+  // Tạo job báo cáo mới. Chặn double-click bằng `submitting`: job AI chạy CPU-only tốn
+  // nhiều phút/bài, bấm trùng sẽ tạo 2 job Celery song song rất lãng phí tài nguyên.
+  // Lưu job_id vào sessionStorage để effect khôi phục sau F5 (phía trên) tìm lại được.
   async function handleSubmit() {
+    setSubmitting(true);
     setError(null);
-    const res = await fetch(`${API_BASE}/api/reports/create`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        source_ids: selectedSourceIds,
-        date_from: dateFrom.format("YYYY-MM-DD"),
-        date_to: dateTo.format("YYYY-MM-DD"),
-      }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setError(body.detail || "Tạo báo cáo thất bại");
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/api/reports/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          source_ids: selectedSourceIds,
+          date_from: dateFrom.format("YYYY-MM-DD"),
+          date_to: dateTo.format("YYYY-MM-DD"),
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.detail || "Tạo báo cáo thất bại");
+        return;
+      }
+      const data = await res.json();
+      sessionStorage.setItem(JOB_ID_STORAGE_KEY, data.job_id);
+      setJobId(data.job_id);
+      setArticles([]);
+      updateStatus({ job_id: data.job_id, status: data.status, progress: { crawled: 0, analyzed: 0, total_estimated: 0 } });
+    } finally {
+      setSubmitting(false);
     }
-    const data = await res.json();
-    sessionStorage.setItem(JOB_ID_STORAGE_KEY, data.job_id);
-    setJobId(data.job_id);
-    setArticles([]);
-    updateStatus({ job_id: data.job_id, status: data.status, progress: { crawled: 0, analyzed: 0, total_estimated: 0 } });
   }
 
+  // Hủy job đang chạy. Dùng updater callback (setStatus(prev => ...)) thay vì đóng
+  // (closure) trực tiếp biến `status` để không vô tình ghi đè bằng snapshot cũ nếu
+  // state đã đổi trong lúc chờ response. Báo lỗi rõ ràng khi cancel thất bại (vd job
+  // vừa chuyển completed/failed ngay trước đó — backend trả 400) thay vì im lặng bỏ qua.
   async function handleCancel() {
     if (!status) return;
     const res = await fetch(`${API_BASE}/api/reports/${status.job_id}/cancel`, { method: "POST" });
     if (res.ok) {
       const data = await res.json();
-      updateStatus({ ...status, status: data.status });
+      setStatus((prev) => (prev ? { ...prev, status: data.status } : prev));
+      sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
+    } else {
+      setError("Không thể hủy job — job có thể đã hoàn tất hoặc gặp lỗi trước đó.");
     }
   }
 
@@ -195,7 +223,7 @@ export default function ReportCreate() {
           </div>
 
           <Space>
-            <Button type="primary" disabled={disabled} onClick={handleSubmit}>
+            <Button type="primary" disabled={disabled || submitting} loading={submitting} onClick={handleSubmit}>
               Tạo báo cáo
             </Button>
             <Button onClick={() => navigate("/reports")}>Hủy</Button>

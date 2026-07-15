@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Button, Card, Table, Tag } from "antd";
+import { Alert, Button, Card, Table, Tag } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
@@ -20,12 +20,19 @@ export default function ReportsPage() {
   const navigate = useNavigate();
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
+  // Lấy lịch sử báo cáo. Phân biệt rõ "lỗi gọi API" với "chưa có báo cáo nào" bằng state
+  // `error` riêng — nếu chỉ set history=[] khi lỗi, Table sẽ hiện nhầm emptyText mặc định
+  // dù thực chất backend đang lỗi/không kết nối được, đánh lừa người dùng.
   useEffect(() => {
     fetch(`${API_BASE}/api/reports/history`)
-      .then((res) => (res.ok ? res.json() : { history: [] }))
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
       .then((data) => setHistory(data.history ?? []))
-      .catch(() => setHistory([]))
+      .catch(() => setError("Không tải được lịch sử báo cáo"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -43,6 +50,7 @@ export default function ReportsPage() {
       />
 
       <Card style={{ borderRadius: 12 }}>
+        {error && <Alert type="error" message={error} showIcon style={{ marginBottom: 16 }} />}
         <Table<HistoryEntry>
           loading={loading}
           rowKey="report_id"
