@@ -16,7 +16,7 @@ function Blocks() {
       <polygon points="4,8 158,8 140,128 0,128" fill="#0B2262" />
       <polygon points="165,8 318,8 300,128 148,128" fill="#8C95A0" />
       <polygon points="325,8 478,8 460,128 308,128" fill="#00859A" />
-      <polygon points="473,8 492,8 492,128 455,128" fill="#00859A" />
+      {/* <polygon points="473,8 492,8 492,128 455,128" fill="#00859A" /> */}
 
       <text x="22" y="110" fontFamily="'Arial Black','Arial'" fontWeight={900} fontSize={108} fontStyle="italic" fill="#FFFFFF">
         N
@@ -53,7 +53,7 @@ export default function Logo({ collapsed }: Props) {
     <svg width={width} height={height} viewBox={`0 0 ${viewBoxWidth} ${viewBoxHeight}`} xmlns="http://www.w3.org/2000/svg">
       <Blocks />
 
-      <text x="474" y="34" fontFamily="Arial" fontSize={22} fill="#00859A">
+      <text x="485" y="40" fontFamily="Arial" fontSize={42} fill="#00859A">
         ®
       </text>
 
