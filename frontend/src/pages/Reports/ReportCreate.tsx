@@ -183,8 +183,14 @@ export default function ReportCreate() {
     }
   }
 
-  const disabled = !dateFrom || !dateTo || dateFrom.isAfter(dateTo) || selectedSourceIds.length === 0;
-  const canCancel = status?.status === "pending" || status?.status === "running";
+  // `submitting` chỉ đúng trong lúc gọi POST /create (vài trăm ms) — job crawl+AI thật
+  // chạy nền 8-13 giây hoặc lâu hơn sau đó, nên phải khóa nút suốt thời gian job còn
+  // pending/running (jobActive), không chỉ trong lúc gọi API tạo job. Thiếu điều kiện
+  // này cho phép spam click tạo hàng loạt job trùng lặp trong lúc job trước còn chạy.
+  const jobActive = status?.status === "pending" || status?.status === "running";
+  const disabled =
+    !dateFrom || !dateTo || dateFrom.isAfter(dateTo) || selectedSourceIds.length === 0 || jobActive || submitting;
+  const canCancel = jobActive;
   const progressPercent = status && status.progress.total_estimated > 0
     ? Math.round(((status.progress.crawled + status.progress.analyzed) / (status.progress.total_estimated * 2)) * 100)
     : 0;
@@ -223,7 +229,7 @@ export default function ReportCreate() {
           </div>
 
           <Space>
-            <Button type="primary" disabled={disabled || submitting} loading={submitting} onClick={handleSubmit}>
+            <Button type="primary" disabled={disabled} loading={submitting} onClick={handleSubmit}>
               Tạo báo cáo
             </Button>
             <Button onClick={() => navigate("/reports")}>Hủy</Button>
