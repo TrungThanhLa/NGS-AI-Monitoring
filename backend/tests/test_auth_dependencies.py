@@ -5,8 +5,15 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from datetime import datetime, timedelta, timezone
+
 from backend.auth.dependencies import get_current_user, require_permission
-from backend.auth.security import create_access_token
+from backend.auth.security import (
+    JWT_ALGORITHM,
+    SECRET_KEY,
+    create_access_token,
+    create_refresh_token,
+)
 from backend.db import get_db
 from backend.models import Permission, Role, RolePermission, User, UserRole
 
@@ -75,3 +82,21 @@ def test_require_permission_rejects_user_without_permission(app_client, user_wit
     token = create_access_token(str(user_without_permission.user_id))
     response = app_client.get("/needs-perm", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 403
+
+
+def test_get_current_user_rejects_refresh_token_used_as_access_token(app_client, user_with_permission):
+    # Refresh token không được phép tự xác thực API — chỉ access token mới hợp lệ
+    refresh_token = create_refresh_token(str(user_with_permission.user_id))
+    response = app_client.get("/whoami", headers={"Authorization": f"Bearer {refresh_token}"})
+    assert response.status_code == 401
+
+
+def test_get_current_user_rejects_expired_access_token(app_client, user_with_permission):
+    expired_payload = {
+        "sub": str(user_with_permission.user_id),
+        "type": "access",
+        "exp": datetime.now(timezone.utc) - timedelta(minutes=1),
+    }
+    expired_token = jwt.encode(expired_payload, SECRET_KEY, algorithm=JWT_ALGORITHM)
+    response = app_client.get("/whoami", headers={"Authorization": f"Bearer {expired_token}"})
+    assert response.status_code == 401
