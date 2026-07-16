@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Layout, Menu, Avatar, Badge, Typography, Space, Button } from "antd";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import Logo from "@/components/common/Logo";
+import { useAuth } from "@/lib/AuthContext";
 import {
   DashboardOutlined,
   RadarChartOutlined,
@@ -16,6 +17,7 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   BellOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
 
 const { Sider, Header, Content } = Layout;
@@ -54,6 +56,7 @@ export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
 
   const selectedKey = (() => {
     const path = location.pathname;
@@ -149,10 +152,20 @@ export default function MainLayout() {
               <Avatar style={{ background: "#00859A" }} size={32} icon={<UserOutlined />} />
               {!collapsed && (
                 <Typography.Text strong style={{ color: "#0A1D55" }}>
-                  Nguyễn Văn A
+                  {user?.username}
                 </Typography.Text>
               )}
             </Space>
+            <Button
+              type="text"
+              icon={<LogoutOutlined style={{ fontSize: 16 }} />}
+              onClick={() => {
+                logout();
+                navigate("/login");
+              }}
+            >
+              {!collapsed && "Đăng xuất"}
+            </Button>
           </Space>
         </Header>
 
