@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 import jwt
 from fastapi import Depends, HTTPException, status
@@ -11,6 +12,22 @@ from backend.models import Permission, RolePermission, User, UserRole
 
 bearer_scheme = HTTPBearer()
 
+_INVALID_TOKEN_EXC = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token không hợp lệ")
+_USER_UNUSABLE_EXC = HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED, detail="Tài khoản không tồn tại hoặc đã bị vô hiệu hóa"
+)
+
+
+def _is_user_usable(user: User | None) -> bool:
+    """Cùng 3 điều kiện login() đã kiểm tra trước khi cấp token — is_active, status,
+    locked_until — để không có kẽ hở cho phép token cũ còn hiệu lực khi tài khoản đã
+    bị khóa/vô hiệu hóa sau khi token được cấp."""
+    if user is None or not user.is_active or user.status != "ACTIVE":
+        return False
+    if user.locked_until and user.locked_until.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+        return False
+    return True
+
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
@@ -19,16 +36,20 @@ def get_current_user(
     try:
         payload = decode_token(credentials.credentials)
     except jwt.PyJWTError:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token không hợp lệ")
+        raise _INVALID_TOKEN_EXC
 
     if payload.get("type") != "access":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token không hợp lệ")
+        raise _INVALID_TOKEN_EXC
 
-    user = db.get(User, uuid.UUID(payload["sub"]))
-    if user is None or not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Tài khoản không tồn tại hoặc đã bị vô hiệu hóa"
-        )
+    try:
+        user = db.get(User, uuid.UUID(payload["sub"]))
+    except (KeyError, ValueError, AttributeError):
+        raise _INVALID_TOKEN_EXC
+
+    # Không tiết lộ lý do cụ thể (không tồn tại/bị khóa/bị vô hiệu hóa) — cùng nguyên tắc
+    # chống đoán username ở login(), luôn trả về đúng 1 thông báo chung
+    if not _is_user_usable(user):
+        raise _USER_UNUSABLE_EXC
 
     return user
 

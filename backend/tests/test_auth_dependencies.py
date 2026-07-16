@@ -91,6 +91,35 @@ def test_get_current_user_rejects_refresh_token_used_as_access_token(app_client,
     assert response.status_code == 401
 
 
+def test_get_current_user_rejects_locked_or_inactive_status_user(app_client, db_session):
+    # Token vẫn còn hạn (access token 60') nhưng tài khoản đã bị khóa/vô hiệu hóa SAU khi
+    # token được cấp — is_active vẫn true nhưng status/locked_until đã đổi, phải chặn
+    user = User(
+        username=f"user-{uuid.uuid4()}",
+        password_hash="hash",
+        is_active=True,
+        status="INACTIVE",
+    )
+    db_session.add(user)
+    db_session.commit()
+    token = create_access_token(str(user.user_id))
+    response = app_client.get("/whoami", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+
+    user2 = User(
+        username=f"user-{uuid.uuid4()}",
+        password_hash="hash",
+        is_active=True,
+        status="ACTIVE",
+        locked_until=datetime.now(timezone.utc) + timedelta(minutes=30),
+    )
+    db_session.add(user2)
+    db_session.commit()
+    token2 = create_access_token(str(user2.user_id))
+    response2 = app_client.get("/whoami", headers={"Authorization": f"Bearer {token2}"})
+    assert response2.status_code == 401
+
+
 def test_get_current_user_rejects_expired_access_token(app_client, user_with_permission):
     expired_payload = {
         "sub": str(user_with_permission.user_id),

@@ -7,7 +7,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
-from backend.auth.dependencies import get_current_user
+from backend.auth.dependencies import _is_user_usable, get_current_user
 from backend.auth.schemas import LoginRequest, RefreshRequest, TokenResponse, UserResponse
 from backend.auth.security import (
     create_access_token,
@@ -55,6 +55,8 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     if user is None:
         raise HTTPException(status_code=401, detail="Sai tên đăng nhập hoặc mật khẩu")
 
+    # Check khóa tạm thời TRƯỚC khi check mật khẩu — tài khoản đang bị khóa thì dù gõ
+    # đúng mật khẩu cũng phải chặn, không để lộ việc mật khẩu đúng qua status code khác nhau
     now = datetime.now(timezone.utc)
     if user.locked_until and user.locked_until.replace(tzinfo=timezone.utc) > now:
         raise HTTPException(status_code=423, detail="Tài khoản đang bị khóa tạm thời, thử lại sau")
@@ -65,6 +67,8 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     if not verify_password(payload.password, user.password_hash):
         user.failed_login_count = (user.failed_login_count or 0) + 1
         if user.failed_login_count >= _MAX_FAILED_ATTEMPTS:
+            # Reset counter về 0 ngay khi khóa — `locked_until` mới là cái thực sự chặn
+            # đăng nhập tiếp theo, không cần giữ counter cao sau khi đã khóa
             user.locked_until = now + timedelta(minutes=_LOCKOUT_MINUTES)
             user.failed_login_count = 0
         db.commit()
@@ -92,8 +96,15 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     if decoded.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Refresh token không hợp lệ")
 
-    user = db.get(User, uuid.UUID(decoded["sub"]))
-    if user is None or not user.is_active:
+    try:
+        user = db.get(User, uuid.UUID(decoded["sub"]))
+    except (KeyError, ValueError, AttributeError):
+        raise HTTPException(status_code=401, detail="Refresh token không hợp lệ")
+
+    # Kiểm tra cùng 3 điều kiện login() đã kiểm tra (is_active/status/locked_until) —
+    # tránh kẽ hở cấp access token mới cho tài khoản vừa bị khóa/vô hiệu hóa sau khi
+    # refresh token đã phát hành (refresh token sống tới 7 ngày)
+    if not _is_user_usable(user):
         raise HTTPException(status_code=401, detail="Tài khoản không tồn tại hoặc đã bị vô hiệu hóa")
 
     return {"access_token": create_access_token(str(user.user_id))}

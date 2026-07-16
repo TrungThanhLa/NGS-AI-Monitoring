@@ -15,12 +15,19 @@ from backend.routers import auth
 
 @pytest.fixture
 def app_client(db_session):
+    # Tắt rate limit khi test — TestClient dùng chung 1 IP giả cho mọi request, nên
+    # toàn bộ test trong file này (và test khác gọi /login) sẽ cùng chia sẻ 1 ngân sách
+    # 10/phút thật, dễ gây 429 giả (flaky), không phải lỗi logic đang test
+    auth.limiter.enabled = False
     app = FastAPI()
     app.state.limiter = auth.limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     app.include_router(auth.router)
     app.dependency_overrides[get_db] = lambda: db_session
-    return TestClient(app)
+    try:
+        yield TestClient(app)
+    finally:
+        auth.limiter.enabled = True
 
 
 @pytest.fixture
@@ -74,6 +81,19 @@ def test_refresh_returns_new_access_token(app_client, user):
     response = app_client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
     assert response.status_code == 200
     assert "access_token" in response.json()
+
+
+def test_refresh_rejects_user_locked_after_token_issued(app_client, user, db_session):
+    # Refresh token còn hạn tới 7 ngày — nếu tài khoản bị khóa SAU khi refresh token đã
+    # phát hành, endpoint /refresh không được phép cấp access token mới
+    login_response = app_client.post("/api/auth/login", json={"username": user.username, "password": "Str0ngPass!"})
+    refresh_token = login_response.json()["refresh_token"]
+
+    user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=30)
+    db_session.commit()
+
+    response = app_client.post("/api/auth/refresh", json={"refresh_token": refresh_token})
+    assert response.status_code == 401
 
 
 def test_me_returns_current_user(app_client, user):
