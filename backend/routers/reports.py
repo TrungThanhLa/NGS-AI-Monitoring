@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.auth.dependencies import require_permission
 from backend.db import get_db
 from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
 from backend.workers.celery_app import celery_app
@@ -25,7 +26,11 @@ class CreateReportRequest(BaseModel):
 
 
 @router.post("/create")
-def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
+def create_report(
+    payload: CreateReportRequest,
+    db: Session = Depends(get_db),
+    _user=Depends(require_permission("report", "create")),
+):
     if payload.date_from > payload.date_to:
         raise HTTPException(status_code=400, detail="date_from không được lớn hơn date_to")
 
@@ -73,7 +78,7 @@ def create_report(payload: CreateReportRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/history")
-def get_report_history(db: Session = Depends(get_db)):
+def get_report_history(db: Session = Depends(get_db), _user=Depends(require_permission("report", "view"))):
     rows = (
         db.query(ReportHistory, Job)
         .join(Job, Job.job_id == ReportHistory.job_id)
@@ -109,7 +114,9 @@ def get_report_history(db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}/status")
-def get_report_status(job_id: UUID, db: Session = Depends(get_db)):
+def get_report_status(
+    job_id: UUID, db: Session = Depends(get_db), _user=Depends(require_permission("report", "view"))
+):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job không tồn tại")
@@ -127,7 +134,9 @@ def get_report_status(job_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}/articles")
-def get_report_articles(job_id: UUID, db: Session = Depends(get_db)):
+def get_report_articles(
+    job_id: UUID, db: Session = Depends(get_db), _user=Depends(require_permission("report", "view"))
+):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job không tồn tại")
@@ -163,7 +172,9 @@ def get_report_articles(job_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.post("/{job_id}/cancel")
-def cancel_report(job_id: UUID, db: Session = Depends(get_db)):
+def cancel_report(
+    job_id: UUID, db: Session = Depends(get_db), _user=Depends(require_permission("report", "create"))
+):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job không tồn tại")
@@ -180,7 +191,9 @@ def cancel_report(job_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.get("/{job_id}/download")
-def download_report(job_id: UUID, db: Session = Depends(get_db)):
+def download_report(
+    job_id: UUID, db: Session = Depends(get_db), _user=Depends(require_permission("report", "view"))
+):
     job = db.get(Job, job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job không tồn tại")

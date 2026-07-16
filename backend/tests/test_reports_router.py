@@ -6,19 +6,34 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.auth.dependencies import get_current_user
 from backend.db import get_db
-from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Source
+from backend.models import Article, ArticleAnalysis, Job, ReportHistory, Role, Source, User, UserRole
 from backend.routers import reports
 
 
 @pytest.fixture
-def app_client(db_session):
+def admin_user(db_session):
+    role = db_session.query(Role).filter_by(code="ADMIN").first()
+    if role is None:
+        pytest.skip("Chưa chạy migration 0011 (seed roles) trên DB test")
+    user = User(username=f"admin-{uuid.uuid4()}", password_hash="x", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(UserRole(user_id=user.user_id, role_id=role.role_id))
+    db_session.commit()
+    return user
+
+
+@pytest.fixture
+def app_client(db_session, admin_user):
     app = FastAPI()
     app.include_router(reports.router)
     # Ép API dùng chung session/transaction với fixture db_session, để rollback
     # ở cuối test dọn sạch cả dữ liệu do request API tạo ra (không chỉ dữ liệu
     # insert thẳng qua db_session) — xem conftest.py.
     app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: admin_user
     return TestClient(app)
 
 
@@ -546,3 +561,13 @@ def test_history_orders_by_created_at_desc(app_client, db_session):
         db_session.delete(job1)
         db_session.delete(job2)
         db_session.commit()
+
+
+def test_create_report_rejects_unauthenticated_request(db_session):
+    app = FastAPI()
+    app.include_router(reports.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    response = client.post("/api/reports/create", json={"source_ids": [], "date_from": "2026-01-01", "date_to": "2026-01-02"})
+    assert response.status_code == 403
