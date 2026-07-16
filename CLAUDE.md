@@ -1,9 +1,10 @@
 # NGS Monitor — CLAUDE.md
 
-Web application thu thập và phân tích nội dung truyền thông phòng chống tin giả
-tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
+Nền tảng giám sát liên tục, thu thập và phân tích nội dung truyền thông phòng chống tin giả tại Việt Nam, AI chạy local. Tự động crawl định kỳ theo Campaign, tự phân tích AI, tự cảnh báo bất thường, hỗ trợ lập hồ sơ điều tra; lập báo cáo
 
 ## Rules
+
+> Mỗi rule mô tả **nghiệp vụ đúng duy nhất** của dự án, không phải "rule cho giai đoạn MVP" + "rule cho giai đoạn sau" — nội dung nào chưa hiện thực được đánh dấu `[CHƯA CODE]` ngay trong file, không tách file riêng theo giai đoạn. Xem [01 · Project Overview](.claude/rules/01-project-overview.md) mục "Về trạng thái implement hiện tại" để hiểu rõ khác biệt này trước khi đọc các rule khác.
 
 <!-- Core — luôn áp dụng -->
 - [01 · Project Overview](.claude/rules/01-project-overview.md)
@@ -23,6 +24,14 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 - [08 · DOCX Report](.claude/rules/08-docx-report.md)
 - [09 · Frontend UI](.claude/rules/09-frontend-ui.md)
 
+<!-- Module chưa code — đọc khi bắt đầu code phần tương ứng trong roadmap
+     (xem docs/ROADMAP_CONTINUOUS_MONITORING.md). Business rules riêng của từng domain;
+     schema/API/UI dùng chung đã gộp vào rule 03/05/09 ở trên -->
+- [15 · Auth & RBAC](.claude/rules/15-auth-rbac.md)
+- [16 · Campaign Management](.claude/rules/16-campaign-management.md)
+- [17 · Continuous Crawler & Scheduler](.claude/rules/17-continuous-crawler-scheduler.md)
+- [18 · Alert & Case Management](.claude/rules/18-alert-case-management.md)
+
 ## Quick Reference
 
 | Thứ cần nhớ | Giá trị |
@@ -40,109 +49,37 @@ tại Việt Nam. AI chạy local, output là file báo cáo Word (.docx).
 > Cập nhật mục này khi có tiến độ hoặc quyết định mới — đây là log tổng hợp, không thay thế checklist chi tiết ở Roadmap dưới.
 > **Lịch sử chi tiết đầy đủ** (số liệu job thật, log, quá trình quyết định) đã chuyển sang [docs/CHANGELOG.md](docs/CHANGELOG.md) — mục dưới đây chỉ giữ bản tóm tắt 1 dòng/mục.
 
-### Đã hoàn thành
-- Scope MVP, tech stack, business flow 8 bước, DB schema 5 bảng, API contract, rule crawler/AI/DOCX/FE (rules 01–09) đã chốt
-- Pilot test thật: khảo sát 40 kênh, crawl được 11/40 (làm nền cho quyết định "không build social media")
-- Slice 0 + Slice 1 (walking skeleton VTV + mở rộng: crawl trực tiếp/benchmark, Cancel, giới hạn job, khôi phục F5, fix timeout/error-handling) — đã merge `main`, verify thật với VTV
-- Crawl4AI (engine fetch thay thế httpx) — bật theo nguồn qua `parsing_rules.engine`, không đổi hành vi nguồn không khai engine (VTV)
-- 7 nguồn cấu hình xong: VTV, VOV, VietnamPlus, CAND, BoCongAn (listing_pages, sitemap đóng băng), TinGia (sitemap curated), vietnam.vn (sitemap curated) — chi tiết từng nguồn + verify job thật ở changelog
-- **Slice 3 (AI pipeline đầy đủ) — hoàn thành (2026-07-09):** `AI_CONCURRENCY`/`analyze_articles_batch()`/track `ai_model` — đã verify job thật 2 giai đoạn (chi tiết ở changelog)
-- **Bỏ dedup xuyên job (2026-07-09):** UNIQUE composite `(job_id, url_hash)` (migration `0009`) thay UNIQUE toàn cục — mỗi job crawl + phân tích AI lại từ đầu, không dedup xuyên job (giải quyết vấn đề "job mồ côi" + "report rỗng âm thầm"). Đánh đổi: AI chạy lại tốn tài nguyên khi job trùng phạm vi, `articles` phình to theo thời gian, kết quả AI không đảm bảo giống hệt giữa các lần (non-determinism) — xem "Vấn đề cần làm rõ"
-- **Slice 4 (Report đầy đủ) — hoàn thành (2026-07-10):** aggregate đầy đủ (`source_counts`/`topic_counts`/`keyword_counts`/`monthly_counts`/`summary_stats`) + DOCX theo đúng `sample_report_form.docx` + validate `emotion` enum (giá trị lạ → `emotion=None`+`needs_review=true`). Verify job thật khớp 100% với query DB trực tiếp
-- **EVEN_DISTRIBUTE_ACROSS_SOURCES — water-filling (2026-07-10):** chia đều + bù quota thiếu hụt giữa các nguồn đã chọn, tổng job tiến gần đúng `MAX_ARTICLES_PER_JOB` thay vì để nguồn đầu "ăn hết" ngân sách
-- **Sửa 2 hạn chế sitemap index VOV/VTV + bỏ 1 request thừa (2026-07-10):** `_SITEMAP_URL_TEMPLATES` (VOV, tự sinh URL sub-sitemap không qua index) + `_SITEMAP_ALWAYS_INCLUDE` (VTV, fetch kèm catch-all khi `date_to >= today`) — cả 2 đã verify job thật
-- **Playwright JS-render fallback (2026-07-13):** `fetch_article_playwright()` — thay bước fetch bằng headless Chromium, tái dùng CSS selector `parsing_rules` giống engine httpx (không tự nhận diện nội dung như Crawl4AI); bật qua `parsing_rules.engine="playwright"`
-- **Migration frontend Next.js → Vite (2026-07-15, nhánh `feature/vite-ui-migration`, chưa merge `main`):** port nguyên giao diện AntD từ project tham khảo `ngs-monitoring-ui` (~24 commit, workflow subagent implementer→reviewer cho từng task theo `docs/superpowers/plans/2026-07-14-vite-ui-migration.md`). Giữ **2 trang thật** nối backend (`/sources` gọi `GET /api/sources`; `/reports` tách 2 trang list+create, giữ nguyên toàn bộ luồng job thật: tạo/poll/cancel/download/khôi phục F5). Mọi trang còn lại (Dashboard, Campaigns, Contents, Alerts, Cases, Jobs, System/*) là **mock UI-only** (`frontend/src/data/mockData.ts`), không gọi API thật. Bỏ hẳn Auth (Login/Profile), bỏ `@tanstack/react-query`/`zustand`/`msw` (chỉ dùng `fetch` + `useState`). Kèm Docker/nginx build tĩnh production (`frontend/Dockerfile` multi-stage node→nginx, `.dockerignore` giảm build context 370MB→4.41kB, `VITE_API_BASE_URL` truyền qua build-arg vì Vite bake env lúc build chứ không đọc runtime). Đã cập nhật [02 · Tech Stack](.claude/rules/02-tech-stack.md) và [09 · Frontend UI](.claude/rules/09-frontend-ui.md) khớp thực tế mới
+### Nghiệp vụ đúng duy nhất — và vì sao code hiện tại chưa khớp
 
-### Trạng thái hiện tại
-- Slice 0–4: hoàn thành, đã merge `main`, verify job thật cho từng slice (chi tiết ở [docs/CHANGELOG.md](docs/CHANGELOG.md))
-- BoCongAn: code + migration `0005` đã push `main`, **chưa verify bằng job thật** — bị chặn WAF (Incapsula) từ mạng hiện tại, không phải lỗi code (3 unit test suite pass)
-- Slice 5: hoàn thành (trang lịch sử báo cáo + error handling JS-render fallback Playwright). Slice 6: chưa bắt đầu
-- **GPU tùy chọn cho Ollama (2026-07-14):** thêm `docker-compose.gpu-nvidia.yml`/`docker-compose.gpu-amd.yml` (override, bật qua `COMPOSE_FILE` trong `.env`, mặc định vẫn CPU-only) — xem [02 · Tech Stack](.claude/rules/02-tech-stack.md). **Chưa verify bằng GPU thật** (máy dev hiện tại có GPU AMD Radeon RX 6000, ROCm hỗ trợ hạn chế trên Windows/WSL2 — cần verify khi có máy Linux/NVIDIA thật)
-- **Frontend Vite migration:** code-complete, build/typecheck/Docker verify xong, nằm ở nhánh `feature/vite-ui-migration` (đã push `origin`, **chưa merge `main`** — chờ quyết định của user). Verify E2E đầy đủ luồng "Báo cáo" thật (tạo job → AI chạy xong → download) **bị chặn một phần** bởi giới hạn RAM host hiện tại (~7.6GB cấp cho Docker/WSL2, không đủ chạy ổn định `qwen3:8b` ~5.2GB — bị OOM-killed), user đã chấp nhận verify một phần và cho tiếp tục
+> **Lưu ý quan trọng (chốt lại 2026-07-16, sau khi phát hiện hiểu nhầm ở lần cập nhật trước):** dự án **không có 2 giai đoạn sản phẩm nối tiếp nhau** ("MVP on-demand đã xong" rồi "Continuous Monitoring là bước phát triển tiếp theo"). Chỉ có **một nghiệp vụ đúng duy nhất** — nền tảng giám sát liên tục, Campaign sống → Scheduler → AI → Alert → Case → Report (xem [01 · Project Overview](.claude/rules/01-project-overview.md)). Cách hiện thực ban đầu (mô hình "1 Job = 1 lần crawl theo yêu cầu", không Auth, không giám sát liên tục) là một cách hiểu nghiệp vụ **chưa đúng/chưa đủ** so với nhu cầu thật, không phải một giai đoạn sản phẩm hoàn chỉnh và đúng đắn. `docs/project_business/` là hồ sơ quá trình phát hiện ra sai lệch này và chốt lại nghiệp vụ đúng; [docs/ROADMAP_CONTINUOUS_MONITORING.md](docs/ROADMAP_CONTINUOUS_MONITORING.md) là lộ trình **sửa/bổ sung code hiện tại** cho khớp với nghiệp vụ đúng — không phải lộ trình "xây thêm tính năng mới trên nền đã đúng".
+
+### Phần đã code — `[ĐÃ CODE]` (một phần hiện thực chưa đầy đủ, đang được sửa)
+
+- Nền tảng (DB/Celery/Ollama), crawler đa nguồn/đa engine (7 nguồn thật, httpx/Crawl4AI/Playwright), AI pipeline đầy đủ 8 nhóm chủ đề, report DOCX khớp dữ liệu thật, frontend Vite đã merge `main` — chạy được đúng nhánh "crawl 1 lần theo yêu cầu" (`jobs`), chưa có Campaign/Scheduler/Auth/Alert/Case. Lịch sử triển khai từng Slice (checklist, verify, số liệu job thật): [docs/ROADMAP_MVP.md](docs/ROADMAP_MVP.md) — đây là **nhật ký lịch sử**, không phải mô tả 1 giai đoạn sản phẩm đã hoàn chỉnh.
+- Admin UI quản lý nguồn qua giao diện riêng (Slice 6 cũ) đã loại khỏi scope thực thi trực tiếp (2026-07-16) — quản lý nguồn qua API `/api/sources` hiện có là đủ.
+- Nguồn BoCongAn bị WAF chặn, chưa verify job thật — không phải lỗi code, chấp nhận rủi ro tạm thời.
+
+### Phần chưa code — `[CHƯA CODE]`
+
+Auth/RBAC, Campaign (thay thế hoàn toàn `jobs`), Scheduler crawl liên tục, Content review, Alert, Case — toàn bộ business rule/schema/API/screens đã chốt, viết thành rule chính thức [15](.claude/rules/15-auth-rbac.md)–[18](.claude/rules/18-alert-case-management.md) và gộp vào rule 03/04/05/06/07/08/09 ở trên. Thứ tự triển khai theo Phase: [docs/ROADMAP_CONTINUOUS_MONITORING.md](docs/ROADMAP_CONTINUOUS_MONITORING.md). Lịch sử đầy đủ quá trình ra quyết định: `docs/project_business/`.
 
 ### Bước tiếp theo
-1. Chạy lại job thật cho bocongan.gov.vn khi mạng không còn bị Incapsula WAF chặn (thử lại sau vài giờ/vài ngày, hoặc từ mạng khác) — code + migration đã sẵn sàng, chỉ còn thiếu bước verify bằng dữ liệu thật
-2. Slice 6 (Admin UI quản lý nguồn: CRUD metadata, xem/sửa `parsing_rules` kèm form tùy chọn theo loại nguồn)
-3. Quyết định merge/PR cho nhánh `feature/vite-ui-migration` (hiện đang giữ nguyên, chưa merge `main` theo yêu cầu user) — cân nhắc verify lại luồng AI thật khi có máy đủ RAM trước khi merge
+1. Bắt đầu Phase 1 (Auth & RBAC) khi có quyết định triển khai — xem [docs/ROADMAP_CONTINUOUS_MONITORING.md](docs/ROADMAP_CONTINUOUS_MONITORING.md) và rule [15](.claude/rules/15-auth-rbac.md)
 
 ### Quyết định quan trọng & lý do
 | Quyết định | Lý do |
 |---|---|
-| Không build social media (Facebook/YouTube/TikTok/Zalo) trong MVP | Cần API xác thực riêng, nội dung video không hợp pipeline text-crawl → AI-classify hiện tại; pilot test chỉ 11/40 kênh (toàn website) crawl được |
-| Output báo cáo chỉ gồm `Report.docx` + `JSON raw data` | Tránh scope creep so với các file phụ liệt kê trong `sample_report_form.docx` (Dataset.csv, Chart.png...) |
-| `emotion` (6 lớp) lấy cùng 1 lần gọi Ollama với `sentiment` | Báo cáo cần Bảng 3.15 tách biệt sentiment 3 lớp; gộp vào 1 lần gọi để tránh round-trip thứ 2 |
-| Lọc lại theo `published_at` thật sau khi fetch bài, không chỉ tin sitemap `<lastmod>` | Một số nguồn (VD bocongan.gov.vn) ghi `<lastmod>` giống nhau cho mọi URL, không phải ngày đăng thật |
-| Listing-page crawler chỉ hỗ trợ 1 trang, không phân trang | cơ chế này tạm không còn nguồn thật nào dùng — vẫn giữ lại làm fallback tổng quát |
-| `_SITEMAP_DATE_PATTERNS`: dict domain → regex riêng (thay 2 regex chung `_DATE_RANGE_RE`/`_YEAR_MONTH_RE`) | Mỗi site có format URL khác nhau; thêm nguồn mới = thêm 1 entry, không ảnh hưởng site khác. Domain không khai pattern → skip |
-| Một số site sẽ bỏ ưu tiên sitemap và sẽ được xử lý với cách riêng tương ứng theo từng site (ví dụ: theo chuyên mục, CSS Selector,...) |
-| `_get_candidates()` ưu tiên `parsing_rules.listing_pages` cao nhất, kể cả khi `source.sitemap_url` vẫn còn giá trị trong DB |
-| Crawl phân trang trong từng chuyên mục — CHƯA LÀM ở giai đoạn này |
-| `parsing_rules.sitemap_pages` lưu ở DB (JSONB), không chuyển sang file JSON trong code hay hardcode dict trong `sitemap.py` | Cân nhắc 3 phương án cùng user (DB JSONB / code dict giống `_SITEMAP_DATE_PATTERNS` / 1 file JSON chung cho tất cả nguồn). Giữ DB JSONB để nhất quán với `listing_pages` (BoCongAn) — cùng 1 nguồn không nên tách config ra 2 nơi (DB cho CSS selector + file cho URL); sửa qua SQL/migration không cần rebuild code, trong khi 2 phương án kia đều cần sửa code + rebuild `celery-worker`. User đề xuất thêm tab quản lý `parsing_rules` qua Admin UI ở Slice 6 tương lai — xem note ở Slice 6 |
-| Chuyển frontend từ Next.js sang Vite + React SPA, build tĩnh serve qua nginx (2026-07-15) | User muốn bê nguyên UI từ project tham khảo `ngs-monitoring-ui` (đã dùng Vite/AntD) để tận dụng tối đa, tránh công sức viết lại theo App Router của Next.js; production build tĩnh + nginx đơn giản hơn self-host Next.js server cho 1 SPA thuần |
-| Chỉ giữ `/sources` và `/reports` (2 trang) nối API thật; mọi trang khác (Dashboard, Campaigns, Contents, Alerts, Cases, Jobs, System/*) là mock UI-only | Đúng phạm vi MVP hiện tại — các trang đó thuộc tính năng tương lai ngoài roadmap Slice 0–6, port UI trước để thấy toàn cảnh sản phẩm nhưng không tốn công viết backend chưa cần |
-| Bỏ `@tanstack/react-query`, `zustand`, `msw` và toàn bộ Auth (Login/Profile/PermissionGuard) khi port | Các trang thật (Sources/Reports) chỉ cần `fetch` + `useState` là đủ, không cần state-management/mocking-server phức tạp; Auth ngoài phạm vi MVP hiện tại (chưa có yêu cầu đăng nhập) |
-| Giữ đúng version AntD `^6.5.1` (khớp nhánh `feature/slice-6-build-ui` đã duyệt trước đó), không dùng `^5.15.0` của project tham khảo | Tránh 2 version AntD khác nhau tồn tại giữa 2 lần làm UI trong cùng 1 codebase — giữ nhất quán component API đã review |
-| Sidebar giữ đúng cấu trúc submenu lồng 2 cấp của project tham khảo (không làm phẳng) | Khớp đúng số lượng trang thật đã port (đặc biệt nhóm "Cấu hình hệ thống" có sub-parent "Người dùng & phân quyền") |
-| Không merge `feature/vite-ui-migration` vào `main` ngay sau khi code-complete | User yêu cầu giữ nguyên trên nhánh, chưa quyết định thời điểm merge — có thể do luồng AI thật (Task 6) mới chỉ verify được một phần vì giới hạn RAM host |
+| Không build social media (Facebook/YouTube/TikTok/Zalo) trong MVP | Cần API xác thực riêng, nội dung video không hợp pipeline text-crawl → AI-classify hiện tại|
+| Crawl xử lý linh hoạt theo từng nguồn thay vì 1 cơ chế chung: lọc lại `published_at` thật sau fetch (không tin tuyệt đối sitemap `<lastmod>`), `_SITEMAP_DATE_PATTERNS` theo domain, `_get_candidates()` ưu tiên `parsing_rules.listing_pages` nếu có dù vẫn còn `sitemap_url`, 1 số site xử lý riêng ngoài sitemap (chuyên mục/CSS selector) | Mỗi nguồn báo có đặc thù khác nhau (format ngày, độ tin cậy sitemap, cấu trúc URL) — VD bocongan.gov.vn ghi `<lastmod>` giống nhau cho mọi URL, không phải ngày đăng thật; thêm nguồn mới = thêm 1 entry cấu hình, không ảnh hưởng nguồn khác |
+| Listing-page crawler chỉ hỗ trợ 1 trang, không phân trang | Hiện không còn nguồn thật nào dùng — giữ lại làm fallback tổng quát (YAGNI) |
+| Chỉ giữ `/sources` và `/reports` (2 trang) nối API thật; mọi trang khác (Dashboard, Campaigns, Contents, Alerts, Cases, Jobs, System/*) là mock UI-only |
 
 ### Vấn đề cần làm rõ (chưa chốt)
-- **Kết quả AI không đảm bảo giống hệt nhau giữa các lần phân tích cùng 1 bài (phát hiện khi review plan bỏ dedup xuyên job, 2026-07-09):** `qwen3:8b` qua Ollama không set `temperature`/seed cố định — nếu 2 job trùng phạm vi ngày cùng phân tích 1 bài, `topics`/`sentiment`/`emotion`/`confidence` có thể khác nhau giữa 2 lần. Chưa xử lý (chưa set temperature/seed, chưa có cảnh báo trong report) — theo dõi thêm khi có dữ liệu thật từ nhiều job trùng phạm vi, cân nhắc set `temperature=0` nếu Ollama/`qwen3:8b` hỗ trợ. Xem [07 · AI Pipeline](.claude/rules/07-ai-pipeline.md)
-- **Theo dõi kích thước bảng `articles` sau khi bỏ dedup xuyên job (2026-07-09):** mỗi job trùng phạm vi ngày với job trước sẽ thêm 1 bộ dòng mới (không tái sử dụng dòng cũ) — bảng phình to không giới hạn theo thời gian nếu user tạo report định kỳ trùng lịch. Chưa có ngưỡng cảnh báo hay kế hoạch dọn dẹp cụ thể — định kỳ kiểm tra `SELECT count(*) FROM articles`, nếu vượt mốc ước tính (VD >100,000 dòng) thì lên kế hoạch 1 slice archival/cleanup (ngoài phạm vi hiện tại)
-- **Số nguồn Slice 2 hiện đạt 7 (không phải ước tính gốc 8–10; theo `content_survey.docx` con số thực tế nên là ~11–12, khớp pilot test 11/40 — chưa sửa số trong roadmap)** — đã xác nhận 7 nguồn crawl được thật (VTV+VOV+VietnamPlus+CAND+BoCongAn+TinGia+Vietnam.vn, thêm Vietnam.vn 2026-07-08 sau khi Slice 2 "hoàn thành" ban đầu ở mức 6); qdnd.vn bị loại do lỗi redirect-loop chưa rõ nguyên nhân (xem bảng quyết định); chinhphu.vn/mod.gov.vn/bvhttdl.gov.vn không có bài chuyên tin giả theo khảo sát thật — người dùng đã xác nhận 6 nguồn là đủ cho slice này trước đó, Vietnam.vn là bổ sung thêm theo yêu cầu mới, không ép đủ số 8–10
 
-## Roadmap — Vertical Slices
 
-> Cập nhật trạng thái tại đây khi có tiến độ mới — tick `[x]` khi hoàn thành.
-> Mỗi slice (trừ Slice 0) là 1 lát cắt **đầu-cuối** (DB → crawler → AI → report → FE) chạy được thật với dữ liệu thật, không chỉ 1 layer kỹ thuật. Mở rộng dần theo số nguồn/tính năng, không làm hết 1 layer rồi mới sang layer khác. Tổng scope và ước tính thời gian giữ nguyên so với breakdown cũ — chỉ đổi **thứ tự đóng gói** công việc.
+## Roadmap
 
-### Slice 0 — Hạ tầng nền (prerequisite, không phải vertical slice)
-- [x] Khởi tạo project, cấu trúc thư mục, Docker Compose
-- [x] Thiết kế & migrate Database schema (5 bảng, gồm field `emotion` và `prompt_version`)
-- [x] Setup Celery + Redis + Flower
-- [x] Setup Ollama + pull model `qwen3:8b`
-- **Verify:** `docker-compose up` chạy đủ service; DB có đủ 5 bảng; Celery worker nhận và chạy được 1 task test; `curl` Ollama trả response cho 1 prompt test — **đã chạy thật và pass cả 7 service (`docker compose ps` → healthy), bao gồm test healthcheck dependency khi Redis down (2026-06-25)**
+Chi tiết đầy đủ đã chuyển ra file riêng — mục này chỉ giữ bản tóm tắt trạng thái. **Đây là MỘT lộ trình sửa/bổ sung code hiện tại về đúng nghiệp vụ, không phải 2 lộ trình của 2 giai đoạn sản phẩm khác nhau:**
 
-### Slice 1 — "1 nguồn, đầu-cuối" (walking skeleton)
-Mục tiêu: chứng minh toàn bộ pipeline chạy thông từ FE đến file kết quả, với phạm vi hẹp nhất (1 nguồn, vài bài).
-- [x] API `POST /api/reports/create` (1 source_id, date range) → tạo Job, đẩy Celery queue
-- [x] Crawler: sitemap parser cho 1 nguồn thật (VD VTV) + article parser (httpx + BeautifulSoup) + dedup SHA256 + lưu `articles`
-- [x] AI: gọi Ollama, parse JSON, lưu `article_analysis` (đủ field kể cả `emotion`, chưa cần tối ưu prompt 8 nhóm)
-- [x] Report: DOCX cơ bản (vài bảng chính) + export JSON raw data
-- [x] FE tối giản: 1 form chọn nguồn (hardcode) + date range → submit → polling status → download
-- **Verify:** chạy thử với 1 nguồn thực tế, ra được ≥1 file `.docx` + `.json` hợp lệ; `jobs.status` chuyển đúng `pending → running → completed` — **đã chạy thật, 104 bài crawl thật từ VTV, AI phân tích thật qua `qwen3:8b`, DOCX/JSON hợp lệ, 32 unit test pass**
-- **Mở rộng thêm sau khi verify** (đã merge `main` cùng đợt): bảng crawl trực tiếp + benchmark thời gian, hủy job (Cancel), giới hạn `MAX_ARTICLES_PER_JOB`, khôi phục job sau F5, fix AI timeout/crawler error-handling — xem "Quyết định quan trọng & lý do" ở trên
-
-### Slice 2 — Nhiều nguồn + listing-page fallback
-- [x] Listing page crawler (fallback khi nguồn không có sitemap) — `backend/crawler/listing.py`, phạm vi 1 trang không phân trang (YAGNI). **Cập nhật 2026-07-08:** tingia.gov.vn (nguồn từng dùng nhánh này) đã chuyển sang sitemap curated — cơ chế 1-trang trong `listing.py` giữ nguyên (fallback tổng quát cho nguồn tương lai không có sitemap) nhưng hiện không có nguồn thật nào đang dùng
-- [x] Config & test 7 nguồn thực tế (VTV, VOV, VietnamPlus, CAND, BoCongAn, TinGia, Vietnam.vn — thêm sau khi Slice 2 "hoàn thành" ban đầu, vẫn ít hơn ước tính gốc 8–10, xem "Vấn đề cần làm rõ" dưới) — toàn bộ 6 nguồn mới dùng engine Crawl4AI (`parsing_rules.engine = "crawl4ai"`), không viết CSS selector tay
-- [x] FE: sidebar chọn nhiều nguồn (search, group theo nhóm kênh), tag nguồn đã chọn, summary card ước tính số bài/thời gian, preset ngày (7/30/90/150), warning khi ≥5 nguồn & ≥60 ngày
-- **Verify:** crawl thành công 6 nguồn thực tế đã config (cả sitemap và fallback listing); test trùng URL bị dedup đúng (không insert lại) — **đã verify ở mức unit test + migration thật** (sitemap/listing parser, dispatch chiến lược, lọc ngày đăng thật sau fetch, seed 6 nguồn qua `alembic upgrade head`), và đã chạy job thật end-to-end thành công với VOV (2026-06-30, 4/4 bài crawl + AI phân tích xong, `.docx`/`.json` hợp lệ). Cách crawl BoCongAn dùng ở lần verify này (sitemap phẳng) đã lỗi thời — sitemap sau đó được xác nhận đóng băng hoàn toàn (2026-07-07) và đã thay bằng `listing_pages`, xem "Multi-listing-page cho bocongan.gov.vn" ở "Đã hoàn thành"
-
-### Slice 3 — AI pipeline đầy đủ
-- [x] Prompt phân loại đầy đủ 8 nhóm chủ đề + keyword + sentiment + `emotion` (6 lớp) — thực ra đã xong từ Slice 1 (`backend/ai/prompts/v1.py`), Slice 3 chỉ xác nhận qua verify dữ liệu thật (xem dưới), không viết `v2.py` mới
-- [x] Batch processing + tối ưu tốc độ — `AI_CONCURRENCY` (mặc định 1) + `analyze_articles_batch()` (asyncio.Semaphore + gather), track `ai_model` song song `prompt_version`
-- [x] Đánh giá & tinh chỉnh prompt trên dữ liệu thật
-- **Verify:** chạy AI trên **15 bài thực tế** (giảm từ ước tính ban đầu ≥50 bài — tránh chạy AI liên tục >1 tiếng hại phần cứng laptop CPU-only, xem bảng quyết định); `confidence < 0.6` → `needs_review=true` đúng ngưỡng; JSON lỗi → retry 1 lần → skip nếu vẫn lỗi (test case JSON không hợp lệ) — **đã verify job thật thành công 2 giai đoạn (2026-07-09)**, xem "Trạng thái hiện tại"
-
-### Slice 4 — Report đầy đủ
-- [x] Aggregate query đầy đủ: GROUP BY nguồn/chủ đề/tháng/sentiment/emotion
-- [x] Build DOCX template đầy đủ theo `sample_report_form.docx` + placeholder map
-- [x] Kiểm tra output với dữ liệu thật
-- **Verify:** file `.docx` sinh ra khớp cấu trúc `sample_report_form.docx`; số liệu từng bảng khớp với query DB trực tiếp (so sánh tay ít nhất 2-3 bảng)
-
-### Slice 5 — UX & vận hành hoàn chỉnh
-- [x] Job status polling + progress UI chi tiết (`crawled/analyzed/total_estimated`) — đã làm ở Slice 1, mở rộng thêm bảng crawl trực tiếp + Cancel (xem Slice 1)
-- [x] Trang lịch sử báo cáo (`GET /api/reports/history`)
-- [x] Error handling đầy đủ theo [10 · Error Handling](.claude/rules/10-error-handling.md) (retry, timeout, JS-render fallback Playwright) — hoàn thành
-- **Verify:** giả lập timeout/JSON lỗi/nguồn bị block → job xử lý đúng theo bảng error-handling, không crash toàn job
-
-### Slice 6 — Admin UI quản lý nguồn
-- [ ] CRUD metadata nguồn (name/URL/active toggle) — không tự thêm parsing rule mới qua UI
-- **Verify:** thêm/sửa/xoá nguồn qua UI; nguồn mới active hiển thị đúng ở sidebar chọn nguồn (Slice 2)
-- **Ý tưởng chưa chốt (2026-07-08, do user đề xuất khi bàn về nơi lưu `parsing_rules` cho TinGia):** thêm 1 tab riêng trong Admin UI cho phép xem/sửa `parsing_rules` (CSS selector, `listing_pages`, `sitemap_pages`...) trực tiếp qua UI thay vì phải migration/SQL. Hiện **trái với quyết định đã chốt** ở dòng "Admin UI (Slice 6) chỉ CRUD metadata nguồn, không cho thêm parsing rule qua UI" (xem bảng quyết định) — cần bàn riêng nếu muốn đổi scope Slice 6, vì mỗi loại nguồn (sitemap curated/listing-page nhiều trang/CSS selector tay) cần 1 dạng form khác nhau, không phải 1 form CRUD đơn giản
-
-**Timeline (không đổi so với breakdown cũ):**
-- Best case: ~7 tuần
-- Realistic: 9–10 tuần (khuyến nghị dùng để plan)
-- Worst case: 11–12 tuần
+- [docs/ROADMAP_MVP.md](docs/ROADMAP_MVP.md) — **nhật ký lịch sử** những gì đã hiện thực được tới nay (Slice 0–5, chạy thật trên `main`; Slice 6 đã bỏ khỏi scope 2026-07-16). Dùng để biết code hiện có tới đâu, không phải mô tả một sản phẩm hoàn chỉnh.
+- [docs/ROADMAP_CONTINUOUS_MONITORING.md](docs/ROADMAP_CONTINUOUS_MONITORING.md) — lộ trình Phase 0–9 để sửa/bổ sung code hiện tại cho khớp nghiệp vụ đúng, đặc tả đầy đủ ở rule [15](.claude/rules/15-auth-rbac.md)–[18](.claude/rules/18-alert-case-management.md). Phase 0 (chốt phạm vi) đã hoàn thành 2026-07-16 — sẵn sàng bắt đầu Phase 1 (Auth & RBAC) khi có quyết định triển khai.

@@ -4,3 +4,4 @@ frontend/.next/
 .pytest_cache/
 .claude/worktrees/
 storage/
+docs/project_business

@@ -7,7 +7,7 @@ alwaysApply: true
 
 | Thành phần | Công nghệ | Ghi chú |
 |---|---|---|
-| Frontend | Vite + React + Ant Design (`antd@^6.5.1`) | Desktop-first, SPA build tĩnh — chuyển từ Next.js sang Vite (2026-07-15, xem CLAUDE.md "Quyết định quan trọng"), không dùng Tailwind |
+| Frontend | Vite + React + Ant Design (`antd@^6.5.1`) | Desktop-first, SPA build tĩnh |
 | Backend API | Python + FastAPI | REST API, async |
 | Job Queue | Celery + Redis | Background jobs, retry tự động |
 | Crawler | httpx + BeautifulSoup + Playwright | Sitemap XML primary, listing page fallback |
