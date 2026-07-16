@@ -7,6 +7,7 @@ import dayjs from "dayjs";
 import "dayjs/locale/vi";
 import App from "./App";
 import { theme } from "./theme";
+import { AuthProvider } from "@/lib/AuthContext";
 import "./index.css";
 
 dayjs.locale("vi");
@@ -16,7 +17,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <ConfigProvider theme={theme} locale={viVN}>
         <AntdApp>
-          <App />
+          <AuthProvider>
+            <App />
+          </AuthProvider>
         </AntdApp>
       </ConfigProvider>
     </BrowserRouter>

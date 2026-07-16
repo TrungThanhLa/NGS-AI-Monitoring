@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import MainLayout from "@/layouts/MainLayout";
+import LoginPage from "@/pages/Login";
+import ProtectedRoute from "@/components/common/ProtectedRoute";
 import DashboardPage from "@/pages/Dashboard";
 import CampaignsPage from "@/pages/Campaigns";
 import CampaignForm from "@/pages/Campaigns/CampaignForm";
@@ -26,42 +28,46 @@ import ConnectorsPage from "@/pages/System/Connectors";
 export default function App() {
   return (
     <Routes>
-      <Route element={<MainLayout />}>
-        <Route path="/" element={<DashboardPage />} />
+      <Route path="/login" element={<LoginPage />} />
 
-        <Route path="/campaigns" element={<CampaignsPage />} />
-        <Route path="/campaigns/new" element={<CampaignForm />} />
-        <Route path="/campaigns/:id" element={<CampaignDetail />} />
-        <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
+      <Route element={<ProtectedRoute />}>
+        <Route element={<MainLayout />}>
+          <Route path="/" element={<DashboardPage />} />
 
-        <Route path="/sources" element={<SourcesPage />} />
+          <Route path="/campaigns" element={<CampaignsPage />} />
+          <Route path="/campaigns/new" element={<CampaignForm />} />
+          <Route path="/campaigns/:id" element={<CampaignDetail />} />
+          <Route path="/campaigns/:id/edit" element={<CampaignForm />} />
 
-        <Route path="/contents" element={<ContentsPage />} />
-        <Route path="/contents/:id" element={<ContentDetail />} />
+          <Route path="/sources" element={<SourcesPage />} />
 
-        <Route path="/alerts" element={<AlertsPage />} />
-        <Route path="/alerts/:id" element={<AlertDetail />} />
+          <Route path="/contents" element={<ContentsPage />} />
+          <Route path="/contents/:id" element={<ContentDetail />} />
 
-        <Route path="/cases" element={<CasesPage />} />
-        <Route path="/cases/new" element={<CaseForm />} />
-        <Route path="/cases/:id" element={<CaseDetail />} />
-        <Route path="/cases/:id/edit" element={<CaseForm />} />
+          <Route path="/alerts" element={<AlertsPage />} />
+          <Route path="/alerts/:id" element={<AlertDetail />} />
 
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/reports/create" element={<ReportCreate />} />
+          <Route path="/cases" element={<CasesPage />} />
+          <Route path="/cases/new" element={<CaseForm />} />
+          <Route path="/cases/:id" element={<CaseDetail />} />
+          <Route path="/cases/:id/edit" element={<CaseForm />} />
 
-        <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reports/create" element={<ReportCreate />} />
 
-        <Route path="/system/users" element={<UsersPage />} />
-        <Route path="/system/users/new" element={<UserForm />} />
-        <Route path="/system/users/:id/edit" element={<UserForm />} />
-        <Route path="/system/roles" element={<RolesPage />} />
-        <Route path="/system/master-data" element={<MasterDataPage />} />
-        <Route path="/system/settings" element={<SystemSettings />} />
-        <Route path="/system/audit-logs" element={<AuditLogsPage />} />
-        <Route path="/system/connectors" element={<ConnectorsPage />} />
+          <Route path="/jobs" element={<JobsPage />} />
 
-        <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="/system/users" element={<UsersPage />} />
+          <Route path="/system/users/new" element={<UserForm />} />
+          <Route path="/system/users/:id/edit" element={<UserForm />} />
+          <Route path="/system/roles" element={<RolesPage />} />
+          <Route path="/system/master-data" element={<MasterDataPage />} />
+          <Route path="/system/settings" element={<SystemSettings />} />
+          <Route path="/system/audit-logs" element={<AuditLogsPage />} />
+          <Route path="/system/connectors" element={<ConnectorsPage />} />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
       </Route>
     </Routes>
   );
