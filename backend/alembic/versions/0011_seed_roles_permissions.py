@@ -63,7 +63,7 @@ ROLE_PERMISSIONS = {
     "MANAGER": {
         "dashboard.view", "campaign.view", "campaign.create", "campaign.update", "campaign.archive",
         "source.view", "content.view", "content.review", "alert.view", "alert.acknowledge", "alert.update",
-        "alert.close", "case.view", "case.create", "case.update", "report.view", "report.create",
+        "alert.close", "case.view", "case.create", "case.update", "case.close", "report.view", "report.create",
     },
     "ANALYST": {
         "dashboard.view", "campaign.view", "source.view", "content.view", "content.review",
