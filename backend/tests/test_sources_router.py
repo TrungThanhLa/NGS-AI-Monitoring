@@ -4,17 +4,42 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.auth.dependencies import get_current_user
 from backend.db import get_db
-from backend.models import Source
+from backend.models import Role, Source, User, UserRole
 from backend.routers import sources
 
 
 @pytest.fixture
-def app_client(db_session):
+def admin_user(db_session):
+    role = db_session.query(Role).filter_by(code="ADMIN").first()
+    if role is None:
+        pytest.skip("Chưa chạy migration 0011 (seed roles) trên DB test")
+    user = User(username=f"admin-{uuid.uuid4()}", password_hash="x", is_active=True)
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(UserRole(user_id=user.user_id, role_id=role.role_id))
+    db_session.commit()
+    return user
+
+
+@pytest.fixture
+def app_client(db_session, admin_user):
     app = FastAPI()
     app.include_router(sources.router)
     app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[get_current_user] = lambda: admin_user
     return TestClient(app)
+
+
+def test_list_sources_rejects_unauthenticated_request(db_session):
+    app = FastAPI()
+    app.include_router(sources.router)
+    app.dependency_overrides[get_db] = lambda: db_session
+    client = TestClient(app)
+
+    response = client.get("/api/sources")
+    assert response.status_code == 403  # HTTPBearer trả 403 khi thiếu header Authorization
 
 
 def test_list_sources_returns_only_active_sources(app_client, db_session):
