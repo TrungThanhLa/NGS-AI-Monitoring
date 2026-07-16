@@ -167,10 +167,6 @@ export default function ReportCreate() {
     }
   }
 
-  // Hủy job đang chạy. Dùng updater callback (setStatus(prev => ...)) thay vì đóng
-  // (closure) trực tiếp biến `status` để không vô tình ghi đè bằng snapshot cũ nếu
-  // state đã đổi trong lúc chờ response. Báo lỗi rõ ràng khi cancel thất bại (vd job
-  // vừa chuyển completed/failed ngay trước đó — backend trả 400) thay vì im lặng bỏ qua.
   // Tải file DOCX qua authFetch (thay vì <a href>) vì endpoint download giờ yêu cầu
   // Bearer token — thẻ <a> thường không gắn được header Authorization khi điều hướng.
   async function handleDownload(jobId: string) {
@@ -185,6 +181,10 @@ export default function ReportCreate() {
     window.URL.revokeObjectURL(url);
   }
 
+  // Hủy job đang chạy. Dùng updater callback (setStatus(prev => ...)) thay vì đóng
+  // (closure) trực tiếp biến `status` để không vô tình ghi đè bằng snapshot cũ nếu
+  // state đã đổi trong lúc chờ response. Báo lỗi rõ ràng khi cancel thất bại (vd job
+  // vừa chuyển completed/failed ngay trước đó — backend trả 400) thay vì im lặng bỏ qua.
   async function handleCancel() {
     if (!status) return;
     const res = await authFetch(`/api/reports/${status.job_id}/cancel`, { method: "POST" });
