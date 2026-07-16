@@ -3,7 +3,7 @@ import { Button, Card, DatePicker, Space, Table, Tag, Alert, Progress, Popconfir
 import dayjs, { Dayjs } from "dayjs";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
-import { API_BASE } from "@/lib/api";
+import { authFetch } from "@/lib/api";
 import SourceSidebar, { SourceItem } from "./SourceSidebar";
 import SummaryCard from "./SummaryCard";
 
@@ -63,7 +63,7 @@ export default function ReportCreate() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/sources`)
+    authFetch("/api/sources")
       .then((res) => (res.ok ? res.json() : { sources: [] }))
       .then((data) => setSources(data.sources ?? []))
       .catch(() => setSources([]));
@@ -99,8 +99,8 @@ export default function ReportCreate() {
     if (!savedJobId) return;
     (async () => {
       const [statusRes, articlesRes] = await Promise.all([
-        fetch(`${API_BASE}/api/reports/${savedJobId}/status`),
-        fetch(`${API_BASE}/api/reports/${savedJobId}/articles`),
+        authFetch(`/api/reports/${savedJobId}/status`),
+        authFetch(`/api/reports/${savedJobId}/articles`),
       ]);
       if (!statusRes.ok) {
         sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
@@ -123,8 +123,8 @@ export default function ReportCreate() {
     let cancelled = false;
     const interval = setInterval(async () => {
       const [statusRes, articlesRes] = await Promise.all([
-        fetch(`${API_BASE}/api/reports/${jobId}/status`),
-        fetch(`${API_BASE}/api/reports/${jobId}/articles`),
+        authFetch(`/api/reports/${jobId}/status`),
+        authFetch(`/api/reports/${jobId}/articles`),
       ]);
       if (cancelled) return;
       if (statusRes.ok) updateStatus(await statusRes.json());
@@ -143,7 +143,7 @@ export default function ReportCreate() {
     setSubmitting(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/reports/create`, {
+      const res = await authFetch("/api/reports/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -171,9 +171,23 @@ export default function ReportCreate() {
   // (closure) trực tiếp biến `status` để không vô tình ghi đè bằng snapshot cũ nếu
   // state đã đổi trong lúc chờ response. Báo lỗi rõ ràng khi cancel thất bại (vd job
   // vừa chuyển completed/failed ngay trước đó — backend trả 400) thay vì im lặng bỏ qua.
+  // Tải file DOCX qua authFetch (thay vì <a href>) vì endpoint download giờ yêu cầu
+  // Bearer token — thẻ <a> thường không gắn được header Authorization khi điều hướng.
+  async function handleDownload(jobId: string) {
+    const res = await authFetch(`/api/reports/${jobId}/download`);
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${jobId}.docx`;
+    link.click();
+    window.URL.revokeObjectURL(url);
+  }
+
   async function handleCancel() {
     if (!status) return;
-    const res = await fetch(`${API_BASE}/api/reports/${status.job_id}/cancel`, { method: "POST" });
+    const res = await authFetch(`/api/reports/${status.job_id}/cancel`, { method: "POST" });
     if (res.ok) {
       const data = await res.json();
       setStatus((prev) => (prev ? { ...prev, status: data.status } : prev));
@@ -253,7 +267,7 @@ export default function ReportCreate() {
                   </Popconfirm>
                 )}
                 {status.status === "completed" && (
-                  <Button type="link" href={`${API_BASE}/api/reports/${status.job_id}/download`}>
+                  <Button type="link" onClick={() => handleDownload(status.job_id)}>
                     Tải báo cáo DOCX
                   </Button>
                 )}

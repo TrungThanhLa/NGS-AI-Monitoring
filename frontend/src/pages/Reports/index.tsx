@@ -3,7 +3,7 @@ import { Alert, Button, Card, Table, Tag } from "antd";
 import { PlusOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
-import { API_BASE } from "@/lib/api";
+import { authFetch } from "@/lib/api";
 
 type HistoryEntry = {
   report_id: string;
@@ -16,6 +16,20 @@ type HistoryEntry = {
   source_names: string[];
 };
 
+// Tải file DOCX qua authFetch (thay vì <a href>) vì endpoint download giờ yêu cầu
+// Bearer token — thẻ <a> thường không gắn được header Authorization khi điều hướng.
+async function handleDownload(jobId: string) {
+  const res = await authFetch(`/api/reports/${jobId}/download`);
+  if (!res.ok) return;
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${jobId}.docx`;
+  link.click();
+  window.URL.revokeObjectURL(url);
+}
+
 export default function ReportsPage() {
   const navigate = useNavigate();
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -26,7 +40,7 @@ export default function ReportsPage() {
   // `error` riêng — nếu chỉ set history=[] khi lỗi, Table sẽ hiện nhầm emptyText mặc định
   // dù thực chất backend đang lỗi/không kết nối được, đánh lừa người dùng.
   useEffect(() => {
-    fetch(`${API_BASE}/api/reports/history`)
+    authFetch("/api/reports/history")
       .then((res) => {
         if (!res.ok) throw new Error();
         return res.json();
@@ -72,7 +86,7 @@ export default function ReportsPage() {
             {
               title: "Tải về",
               render: (_v, e) => (
-                <Button type="link" href={`${API_BASE}/api/reports/${e.job_id}/download`}>
+                <Button type="link" onClick={() => handleDownload(e.job_id)}>
                   Tải DOCX
                 </Button>
               ),

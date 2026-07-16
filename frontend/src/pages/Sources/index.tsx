@@ -3,7 +3,7 @@ import { Button, Card, Input, Space, Table, Tag, Tooltip, Typography } from "ant
 import { SearchOutlined, EditOutlined, ApiOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
-import { API_BASE } from "@/lib/api";
+import { authFetch } from "@/lib/api";
 
 type Source = {
   source_id: string;
@@ -20,7 +20,7 @@ export default function SourcesPage() {
   const [keyword, setKeyword] = useState("");
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/sources`)
+    authFetch("/api/sources")
       .then((res) => (res.ok ? res.json() : { sources: [] }))
       .then((data) => {
         setSources(data.sources ?? []);
