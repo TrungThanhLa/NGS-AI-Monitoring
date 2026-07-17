@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import MainLayout from "@/layouts/MainLayout";
+import AuthLayout from "@/layouts/AuthLayout";
 import LoginPage from "@/pages/Login";
 import ProtectedRoute from "@/components/common/ProtectedRoute";
 import DashboardPage from "@/pages/Dashboard";
@@ -28,7 +29,9 @@ import ConnectorsPage from "@/pages/System/Connectors";
 export default function App() {
   return (
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route element={<AuthLayout />}>
+        <Route path="/login" element={<LoginPage />} />
+      </Route>
 
       <Route element={<ProtectedRoute />}>
         <Route element={<MainLayout />}>

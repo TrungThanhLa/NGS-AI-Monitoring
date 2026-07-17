@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 210">
+  <!-- N block - Dark Navy Blue -->
+  <polygon points="4,8 158,8 140,128 0,128" fill="#0B2262"/>
+  <!-- G block - Gray (slight gap) -->
+  <polygon points="165,8 318,8 300,128 148,128" fill="#8C95A0"/>
+  <!-- S block - Teal (slight gap) -->
+  <polygon points="325,8 478,8 460,128 308,128" fill="#00859A"/>
+  <!-- Teal right cap -->
+  <polygon points="473,8 492,8 492,128 455,128" fill="#00859A"/>
+
+  <!-- Letter N - bold italic white -->
+  <text x="22" y="110" font-family="'Arial Black','Arial'" font-weight="900" font-size="108" font-style="italic" fill="#FFFFFF">N</text>
+  <!-- Letter G -->
+  <text x="180" y="110" font-family="'Arial Black','Arial'" font-weight="900" font-size="108" font-style="italic" fill="#FFFFFF">G</text>
+  <!-- Letter S -->
+  <text x="334" y="110" font-family="'Arial Black','Arial'" font-weight="900" font-size="108" font-style="italic" fill="#FFFFFF">S</text>
+
+  <!-- ® symbol -->
+  <text x="474" y="34" font-family="Arial" font-size="22" fill="#00859A">®</text>
+
+  <!-- Tagline -->
+  <text x="4" y="178" font-family="Arial,sans-serif" font-weight="600" font-size="27" fill="#0B2262" letter-spacing="0.5">Minh bạch hóa mọi thông tin</text>
+</svg>
