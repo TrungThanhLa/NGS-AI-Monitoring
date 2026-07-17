@@ -9,7 +9,7 @@ from slowapi.errors import RateLimitExceeded
 
 from backend.auth.security import hash_password
 from backend.db import get_db
-from backend.models import Role, User, UserRole
+from backend.models import AuditLog, Role, User, UserRole
 from backend.routers import auth
 
 
@@ -153,3 +153,24 @@ def test_change_password_requires_authentication(app_client):
         json={"current_password": "x", "new_password": "NewStr0ngPass!"},
     )
     assert response.status_code in (401, 403)
+
+
+def test_login_success_writes_audit_log(app_client, user, db_session):
+    response = app_client.post("/api/auth/login", json={"username": user.username, "password": "Str0ngPass!"})
+    assert response.status_code == 200
+    log = db_session.query(AuditLog).filter_by(user_id=user.user_id, action="LOGIN").first()
+    assert log is not None
+
+
+def test_change_password_writes_audit_log(app_client, user, db_session):
+    from backend.auth.security import create_access_token
+
+    token = create_access_token(str(user.user_id))
+    response = app_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "Str0ngPass!", "new_password": "NewStr0ngPass!"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    log = db_session.query(AuditLog).filter_by(user_id=user.user_id, action="UPDATE", entity_type="user").first()
+    assert log is not None

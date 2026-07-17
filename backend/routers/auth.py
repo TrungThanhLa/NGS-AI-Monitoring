@@ -18,6 +18,7 @@ from backend.auth.security import (
     verify_password,
 )
 from backend.auth.serializers import serialize_user
+from backend.audit.logger import log_action
 from backend.db import get_db
 from backend.models import User
 
@@ -57,6 +58,9 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     user.failed_login_count = 0
     user.locked_until = None
     user.last_login_at = now
+    # Ghi audit log ngay trong cùng transaction với việc cập nhật user — commit 1 lần,
+    # tránh log "mồ côi" nếu commit user thành công nhưng log lại lỡ mất
+    log_action(db, user_id=user.user_id, action="LOGIN", entity_type="user", entity_id=user.user_id, request=request)
     db.commit()
 
     return TokenResponse(
@@ -97,6 +101,7 @@ def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 
 @router.post("/change-password")
 def change_password(
+    request: Request,
     payload: ChangePasswordRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -114,5 +119,14 @@ def change_password(
 
     user.password_hash = hash_password(payload.new_password)
     user.updated_at = datetime.now(timezone.utc)
+    log_action(
+        db,
+        user_id=user.user_id,
+        action="UPDATE",
+        entity_type="user",
+        entity_id=user.user_id,
+        new_value={"password_changed": True},
+        request=request,
+    )
     db.commit()
     return {"detail": "Đổi mật khẩu thành công"}
