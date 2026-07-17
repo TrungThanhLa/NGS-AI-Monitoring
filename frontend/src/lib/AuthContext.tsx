@@ -6,6 +6,8 @@ export type CurrentUser = {
   username: string;
   full_name: string | null;
   email: string | null;
+  phone: string | null;
+  avatar_url: string | null;
   roles: string[];
   permissions: string[];
 };
@@ -15,6 +17,7 @@ type AuthContextValue = {
   loading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -68,7 +71,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   }
 
-  return <AuthContext.Provider value={{ user, loading, login, logout }}>{children}</AuthContext.Provider>;
+  // Gọi lại sau khi Profile page tự cập nhật full_name/email/phone/avatar — để Header
+  // (và mọi nơi khác dùng useAuth().user) phản ánh ngay, không cần đăng nhập lại
+  async function refreshUser() {
+    const token = localStorage.getItem("access_token");
+    if (!token) return;
+    try {
+      setUser(await fetchMe(token));
+    } catch {
+      // Token hết hạn/không hợp lệ — để nguyên user cũ, authFetch() ở nơi khác sẽ tự xử lý
+    }
+  }
+
+  return <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {
