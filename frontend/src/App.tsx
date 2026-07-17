@@ -20,7 +20,6 @@ import ReportsPage from "@/pages/Reports";
 import ReportCreate from "@/pages/Reports/ReportCreate";
 import JobsPage from "@/pages/Jobs";
 import UsersPage from "@/pages/System/Users";
-import UserForm from "@/pages/System/Users/UserForm";
 import RolesPage from "@/pages/System/Roles";
 import MasterDataPage from "@/pages/System/MasterData";
 import SystemSettings from "@/pages/System/Settings";
@@ -63,8 +62,6 @@ export default function App() {
           <Route path="/jobs" element={<JobsPage />} />
 
           <Route path="/system/users" element={<UsersPage />} />
-          <Route path="/system/users/new" element={<UserForm />} />
-          <Route path="/system/users/:id/edit" element={<UserForm />} />
           <Route path="/system/roles" element={<RolesPage />} />
           <Route path="/system/master-data" element={<MasterDataPage />} />
           <Route path="/system/settings" element={<SystemSettings />} />
