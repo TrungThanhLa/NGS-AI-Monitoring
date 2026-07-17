@@ -174,3 +174,89 @@ def test_create_user_rejects_nonexistent_role_id(app_client, admin_token):
         headers=_auth_headers(admin_token),
     )
     assert response.status_code == 400
+
+
+def test_get_user_detail(app_client, admin_token, admin_user):
+    response = app_client.get(f"/api/users/{admin_user.user_id}", headers=_auth_headers(admin_token))
+    assert response.status_code == 200
+    assert response.json()["username"] == admin_user.username
+
+
+def test_update_user_status_to_active_clears_lock(app_client, db_session, admin_token, viewer_role):
+    locked_user = User(
+        username=f"locked-{uuid.uuid4()}",
+        password_hash=hash_password("Str0ngPass!"),
+        is_active=False,
+        status="LOCKED",
+        failed_login_count=5,
+    )
+    db_session.add(locked_user)
+    db_session.flush()
+    db_session.add(UserRole(user_id=locked_user.user_id, role_id=viewer_role.role_id))
+    db_session.commit()
+
+    response = app_client.put(
+        f"/api/users/{locked_user.user_id}", json={"status": "ACTIVE"}, headers=_auth_headers(admin_token)
+    )
+    assert response.status_code == 200
+    db_session.refresh(locked_user)
+    assert locked_user.status == "ACTIVE"
+    assert locked_user.is_active is True
+    assert locked_user.failed_login_count == 0
+    assert locked_user.locked_until is None
+
+
+def test_update_user_rejects_empty_role_ids(app_client, admin_token, admin_user):
+    response = app_client.put(
+        f"/api/users/{admin_user.user_id}", json={"role_ids": []}, headers=_auth_headers(admin_token)
+    )
+    assert response.status_code == 400
+
+
+def _deactivate_other_admins(db_session, admin_role, keep_user_id):
+    # DB dev thật đã seed sẵn 1 tài khoản "admin" ACTIVE (migration 0011) — SAVEPOINT
+    # của mỗi test build trên state hiện tại nên tài khoản đó luôn xuất hiện cùng
+    # admin_user của fixture. Vô hiệu hóa các ADMIN active khác (trong transaction
+    # sẽ rollback cuối test) để test "ADMIN cuối cùng" đúng nghĩa chỉ còn 1 admin active.
+    others = (
+        db_session.query(User)
+        .join(UserRole, UserRole.user_id == User.user_id)
+        .filter(UserRole.role_id == admin_role.role_id, User.user_id != keep_user_id, User.status == "ACTIVE")
+        .all()
+    )
+    for u in others:
+        u.status = "INACTIVE"
+        u.is_active = False
+    db_session.commit()
+
+
+def test_cannot_deactivate_last_active_admin(app_client, db_session, admin_token, admin_user, admin_role):
+    _deactivate_other_admins(db_session, admin_role, admin_user.user_id)
+    response = app_client.put(
+        f"/api/users/{admin_user.user_id}", json={"status": "INACTIVE"}, headers=_auth_headers(admin_token)
+    )
+    assert response.status_code == 400
+    assert "ADMIN" in response.json()["detail"]
+
+
+def test_cannot_remove_admin_role_from_last_active_admin(app_client, db_session, admin_token, admin_user, admin_role, viewer_role):
+    _deactivate_other_admins(db_session, admin_role, admin_user.user_id)
+    response = app_client.put(
+        f"/api/users/{admin_user.user_id}",
+        json={"role_ids": [str(viewer_role.role_id)]},
+        headers=_auth_headers(admin_token),
+    )
+    assert response.status_code == 400
+
+
+def test_can_deactivate_admin_when_another_active_admin_exists(app_client, db_session, admin_token, admin_user, admin_role):
+    second_admin = User(username=f"admin2-{uuid.uuid4()}", password_hash=hash_password("Str0ngPass!"), is_active=True, status="ACTIVE")
+    db_session.add(second_admin)
+    db_session.flush()
+    db_session.add(UserRole(user_id=second_admin.user_id, role_id=admin_role.role_id))
+    db_session.commit()
+
+    response = app_client.put(
+        f"/api/users/{admin_user.user_id}", json={"status": "INACTIVE"}, headers=_auth_headers(admin_token)
+    )
+    assert response.status_code == 200
