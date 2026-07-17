@@ -1,52 +1,64 @@
-import { Card, DatePicker, Input, Select, Space, Table } from 'antd'
-import { SearchOutlined } from '@ant-design/icons'
-import { useState } from 'react'
+import { Card, DatePicker, Select, Space, Table, Typography } from 'antd'
+import { useEffect, useState } from 'react'
 import PageHeader from '@/components/common/PageHeader'
-import { auditLogs as mockAuditLogs } from '@/data/mockData'
+import { authFetch } from '@/lib/api'
 import dayjs from 'dayjs'
 
-type LogRow = (typeof mockAuditLogs)[number]
+const { RangePicker } = DatePicker
 
-// Giá trị action thật xuất hiện trong mockData.ts (auditLogs): LOGIN/CREATE/UPDATE/DELETE/
-// VIEW/EXPORT — thêm VIEW so với bản gốc ngs-monitoring-ui (chỉ có LOGIN/LOGOUT/CREATE/
-// UPDATE/DELETE/EXPORT) để khớp đủ giá trị thật trong data mẫu (Task 12)
+type LogRow = {
+  audit_id: string
+  action: string
+  entity_type: string | null
+  entity_id: string | null
+  username: string | null
+  full_name: string | null
+  ip_address: string | null
+  created_at: string | null
+}
+
 const ACTION_COLORS: Record<string, string> = {
   LOGIN: '#1890FF',
-  LOGOUT: '#8C95A0',
   CREATE: '#52C41A',
   UPDATE: '#FAAD14',
-  DELETE: '#F5222D',
-  VIEW: '#722ED1',
-  EXPORT: '#00859A',
 }
 
 export default function AuditLogsPage() {
-  const [keyword, setKeyword] = useState('')
+  const [logs, setLogs] = useState<LogRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [action, setAction] = useState<string | undefined>()
+  const [dateRange, setDateRange] = useState<[string, string] | null>(null)
 
-  const filtered = mockAuditLogs.filter((log) =>
-    (!keyword || log.user.username.toLowerCase().includes(keyword.toLowerCase()) || log.user.full_name.toLowerCase().includes(keyword.toLowerCase())) &&
-    (!action || log.action === action),
-  )
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (action) params.set('action', action)
+    if (dateRange) {
+      params.set('date_from', dateRange[0])
+      params.set('date_to', dateRange[1])
+    }
+    setLoading(true)
+    authFetch(`/api/audit-logs?${params.toString()}`)
+      .then((res) => (res.ok ? res.json() : { audit_logs: [] }))
+      .then((body) => {
+        setLogs(body.audit_logs ?? [])
+        setError(null)
+      })
+      .catch(() => setError('Không tải được nhật ký hoạt động'))
+      .finally(() => setLoading(false))
+  }, [action, dateRange])
 
   const columns = [
-    { title: 'Người dùng', key: 'user', render: (_: unknown, r: LogRow) => r.user.full_name },
+    { title: 'Người dùng', key: 'user', render: (_: unknown, r: LogRow) => r.full_name ?? r.username ?? '—' },
     {
-      title: 'Hành động',
-      dataIndex: 'action',
-      key: 'action',
-      render: (v: string) => (
-        <span style={{ color: ACTION_COLORS[v] ?? '#1890FF', fontWeight: 500 }}>
-          {v}
-        </span>
-      ),
+      title: 'Hành động', dataIndex: 'action', key: 'action',
+      render: (v: string) => <span style={{ color: ACTION_COLORS[v] ?? '#1890FF', fontWeight: 500 }}>{v}</span>,
     },
-    { title: 'Đối tượng', dataIndex: 'resource', key: 'resource' },
-    { title: 'ID đối tượng', dataIndex: 'resource_id', key: 'resource_id', ellipsis: true },
-    { title: 'IP', dataIndex: 'ip_address', key: 'ip_address' },
+    { title: 'Đối tượng', dataIndex: 'entity_type', key: 'entity_type', render: (v: string | null) => v ?? '—' },
+    { title: 'IP', dataIndex: 'ip_address', key: 'ip_address', render: (v: string | null) => v ?? '—' },
     {
       title: 'Thời gian', dataIndex: 'created_at', key: 'created_at',
-      render: (v: string) => dayjs(v).format('DD/MM/YYYY HH:mm'),
+      render: (v: string | null) => (v ? dayjs(v).format('DD/MM/YYYY HH:mm') : '—'),
     },
   ]
 
@@ -57,16 +69,14 @@ export default function AuditLogsPage() {
         breadcrumbs={[{ title: 'Tổng quan', href: '/' }, { title: 'Cấu hình hệ thống' }, { title: 'Nhật ký' }]}
       />
 
+      {error && (
+        <Typography.Text type="danger" style={{ display: 'block', marginBottom: 16 }}>
+          {error}
+        </Typography.Text>
+      )}
+
       <Card style={{ borderRadius: 12 }}>
         <Space style={{ marginBottom: 16 }}>
-          <Input
-            placeholder="Tìm kiếm người dùng..."
-            prefix={<SearchOutlined />}
-            value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
-            style={{ width: 240 }}
-            allowClear
-          />
           <Select
             placeholder="Loại hành động"
             allowClear
@@ -77,20 +87,18 @@ export default function AuditLogsPage() {
               { value: 'LOGIN', label: 'Đăng nhập' },
               { value: 'CREATE', label: 'Tạo mới' },
               { value: 'UPDATE', label: 'Cập nhật' },
-              { value: 'DELETE', label: 'Xóa' },
-              { value: 'VIEW', label: 'Xem' },
-              { value: 'EXPORT', label: 'Xuất file' },
             ]}
           />
-          <DatePicker.RangePicker format="DD/MM/YYYY" />
+          <RangePicker
+            format="DD/MM/YYYY"
+            onChange={(_, dateStrings) => {
+              if (!dateStrings[0] || !dateStrings[1]) { setDateRange(null); return }
+              setDateRange([dayjs(dateStrings[0], 'DD/MM/YYYY').format('YYYY-MM-DD'), dayjs(dateStrings[1], 'DD/MM/YYYY').format('YYYY-MM-DD')])
+            }}
+          />
         </Space>
 
-        <Table
-          columns={columns}
-          dataSource={filtered}
-          rowKey="id"
-          pagination={{ pageSize: 20 }}
-        />
+        <Table columns={columns} dataSource={logs} rowKey="audit_id" loading={loading} pagination={{ pageSize: 20 }} />
       </Card>
     </div>
   )
