@@ -68,7 +68,11 @@ def test_list_audit_logs_filters_by_action_and_date(app_client, db_session, admi
 
     response = app_client.get(
         "/api/audit-logs",
-        params={"action": "LOGIN", "date_from": date.today().isoformat()},
+        # Scope theo user_id của chính user vừa tạo trong test — bắt buộc vì DB dev dùng
+        # chung có thể đã có sẵn nhiều dòng AuditLog action=LOGIN thật (từ smoke test thủ
+        # công/Playwright khác) cùng ngày hôm nay, filter action+date_from không đủ để cô
+        # lập kết quả nếu không lọc thêm theo user_id
+        params={"user_id": str(admin.user_id), "action": "LOGIN", "date_from": date.today().isoformat()},
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 200
