@@ -69,12 +69,17 @@ function StaticRoleFormModal({ open, onClose }: { open: boolean; onClose: () => 
 export default function RolesPage() {
   const [roles, setRoles] = useState<RoleRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
 
   useEffect(() => {
     authFetch('/api/roles')
       .then((res) => (res.ok ? res.json() : { roles: [] }))
-      .then((body) => setRoles(body.roles ?? []))
+      .then((body) => {
+        setRoles(body.roles ?? [])
+        setError(null)
+      })
+      .catch(() => setError('Không tải được danh sách vai trò'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -103,6 +108,12 @@ export default function RolesPage() {
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>Thêm mới</Button>
         </Tooltip>
       </div>
+
+      {error && (
+        <Typography.Text type="danger" style={{ display: 'block', marginBottom: 16 }}>
+          {error}
+        </Typography.Text>
+      )}
 
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #f0f0f0', padding: 16 }}>
         <Table columns={columns} dataSource={roles} rowKey="role_id" loading={loading} pagination={false} />
