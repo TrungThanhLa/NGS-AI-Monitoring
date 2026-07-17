@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel
 
 
@@ -20,6 +22,10 @@ class UserResponse(BaseModel):
     username: str
     full_name: str | None = None
     email: str | None = None
+    status: str
+    is_active: bool
+    created_at: datetime | None = None
+    last_login_at: datetime | None = None
     roles: list[str]
     permissions: list[str]
 

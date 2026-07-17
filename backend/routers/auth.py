@@ -17,39 +17,15 @@ from backend.auth.security import (
     is_password_strong,
     verify_password,
 )
+from backend.auth.serializers import serialize_user
 from backend.db import get_db
-from backend.models import Permission, Role, RolePermission, User, UserRole
+from backend.models import User
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 limiter = Limiter(key_func=get_remote_address)
 
 _MAX_FAILED_ATTEMPTS = 5
 _LOCKOUT_MINUTES = 30
-
-
-def _serialize_user(db: Session, user: User) -> UserResponse:
-    roles = (
-        db.query(Role.code)
-        .join(UserRole, UserRole.role_id == Role.role_id)
-        .filter(UserRole.user_id == user.user_id)
-        .all()
-    )
-    permissions = (
-        db.query(Permission.code)
-        .join(RolePermission, RolePermission.permission_id == Permission.permission_id)
-        .join(UserRole, UserRole.role_id == RolePermission.role_id)
-        .filter(UserRole.user_id == user.user_id)
-        .distinct()
-        .all()
-    )
-    return UserResponse(
-        user_id=str(user.user_id),
-        username=user.username,
-        full_name=user.full_name,
-        email=user.email,
-        roles=[r[0] for r in roles],
-        permissions=[p[0] for p in permissions],
-    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -86,7 +62,7 @@ def login(request: Request, payload: LoginRequest, db: Session = Depends(get_db)
     return TokenResponse(
         access_token=create_access_token(str(user.user_id)),
         refresh_token=create_refresh_token(str(user.user_id)),
-        user=_serialize_user(db, user),
+        user=serialize_user(db, user),
     )
 
 
@@ -116,7 +92,7 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=UserResponse)
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return _serialize_user(db, user)
+    return serialize_user(db, user)
 
 
 @router.post("/change-password")
