@@ -26,6 +26,8 @@ def serialize_user(db: Session, user: User) -> UserResponse:
         email=user.email,
         status=user.status,
         is_active=user.is_active,
+        phone=user.phone,
+        avatar_url=f"/api/users/{user.user_id}/avatar" if user.avatar_path else None,
         created_at=user.created_at,
         last_login_at=user.last_login_at,
         roles=[r[0] for r in roles],

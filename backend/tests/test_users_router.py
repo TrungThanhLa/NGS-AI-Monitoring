@@ -260,3 +260,70 @@ def test_can_deactivate_admin_when_another_active_admin_exists(app_client, db_se
         f"/api/users/{admin_user.user_id}", json={"status": "INACTIVE"}, headers=_auth_headers(admin_token)
     )
     assert response.status_code == 200
+
+
+def test_create_user_accepts_optional_phone(app_client, admin_token, viewer_role):
+    response = app_client.post(
+        "/api/users",
+        json={
+            "username": "userphone1",
+            "email": "p1@x.com",
+            "full_name": "P1",
+            "phone": "0901234567",
+            "password": "Str0ngPass!",
+            "role_ids": [str(viewer_role.role_id)],
+        },
+        headers=_auth_headers(admin_token),
+    )
+    assert response.status_code == 201
+    assert response.json()["phone"] == "0901234567"
+
+
+def test_update_user_phone(app_client, admin_token, admin_user):
+    response = app_client.put(
+        f"/api/users/{admin_user.user_id}", json={"phone": "0909999999"}, headers=_auth_headers(admin_token)
+    )
+    assert response.status_code == 200
+    assert response.json()["phone"] == "0909999999"
+
+
+def test_upload_avatar_rejects_wrong_content_type(app_client, admin_token, admin_user, tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_PATH", str(tmp_path))
+    response = app_client.post(
+        f"/api/users/{admin_user.user_id}/avatar",
+        files={"file": ("test.txt", b"not an image", "text/plain")},
+        headers=_auth_headers(admin_token),
+    )
+    assert response.status_code == 422
+
+
+def test_upload_avatar_rejects_oversized_file(app_client, admin_token, admin_user, tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_PATH", str(tmp_path))
+    oversized = b"0" * (2 * 1024 * 1024 + 1)
+    response = app_client.post(
+        f"/api/users/{admin_user.user_id}/avatar",
+        files={"file": ("big.jpg", oversized, "image/jpeg")},
+        headers=_auth_headers(admin_token),
+    )
+    assert response.status_code == 422
+
+
+def test_upload_and_fetch_avatar(app_client, admin_token, admin_user, tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_PATH", str(tmp_path))
+    upload_response = app_client.post(
+        f"/api/users/{admin_user.user_id}/avatar",
+        files={"file": ("photo.png", b"\x89PNG fake bytes", "image/png")},
+        headers=_auth_headers(admin_token),
+    )
+    assert upload_response.status_code == 200
+    assert upload_response.json()["avatar_url"] == f"/api/users/{admin_user.user_id}/avatar"
+
+    get_response = app_client.get(f"/api/users/{admin_user.user_id}/avatar", headers=_auth_headers(admin_token))
+    assert get_response.status_code == 200
+    assert get_response.content == b"\x89PNG fake bytes"
+
+
+def test_get_avatar_404_when_not_uploaded(app_client, admin_token, admin_user, tmp_path, monkeypatch):
+    monkeypatch.setenv("STORAGE_PATH", str(tmp_path))
+    response = app_client.get(f"/api/users/{admin_user.user_id}/avatar", headers=_auth_headers(admin_token))
+    assert response.status_code == 404

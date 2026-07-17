@@ -20,6 +20,8 @@ class User(Base):
     locked_until = Column(TIMESTAMP)
     last_login_at = Column(TIMESTAMP)
     is_active = Column(Boolean, server_default="true")
+    phone = Column(String(20))
+    avatar_path = Column(Text)
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP)
     deleted_at = Column(TIMESTAMP)
