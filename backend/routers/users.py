@@ -46,7 +46,12 @@ def create_user(
     if db.query(User).filter_by(username=payload.username).first() is not None:
         raise HTTPException(status_code=409, detail="Tên đăng nhập đã tồn tại")
 
-    roles = db.query(Role).filter(Role.role_id.in_([uuid.UUID(rid) for rid in payload.role_ids])).all()
+    try:
+        role_uuids = [uuid.UUID(rid) for rid in payload.role_ids]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Có role_id không hợp lệ")
+
+    roles = db.query(Role).filter(Role.role_id.in_(role_uuids)).all()
     if len(roles) != len(payload.role_ids):
         raise HTTPException(status_code=400, detail="Có role_id không hợp lệ")
 
