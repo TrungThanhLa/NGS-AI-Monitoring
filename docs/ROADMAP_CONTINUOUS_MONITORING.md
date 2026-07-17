@@ -22,6 +22,7 @@
 | 7 | Report mở rộng | Không phụ thuộc Alert/Case — có thể làm ngay sau Phase 2–3 |
 | 8 | Monitoring Feed (UI real-time) | Cần toàn bộ pipeline Phase 3–5 chạy ổn định mới có gì để hiển thị real-time |
 | 9 | Audit Log & System Settings | Có thể làm song song từ Phase 1, đặt cuối vì không chặn nghiệp vụ chính |
+| 10 | Custom Role Management | Đề xuất 2026-07-17 — hoãn tới sau Phase 7 (Report), cần xử lý rủi ro thiết kế trước khi code (xem mục riêng cuối file) |
 
 ---
 
@@ -176,6 +177,26 @@
 
 **Rủi ro:**
 - 🟢 Thấp — module ít phụ thuộc kiến trúc.
+
+---
+
+## Phase 10 — Custom Role Management (đề xuất 2026-07-17, hoãn tới sau Phase 7)
+
+> Đề xuất phát sinh khi hoàn thiện Phase 1: cho phép ADMIN **tạo role tùy chỉnh** qua UI (chọn permission có sẵn qua checkbox, không tự định nghĩa permission code mới). Schema `roles.is_system` đã có sẵn để chừa chỗ cho nhánh này (role `is_system=false`), nhưng API/UI/rule hiện tại (BR-USER-01, rule 05 `GET /api/roles` read-only) chưa hỗ trợ. Chi tiết đầy đủ: `docs/superpowers/specs/2026-07-17-phase1-auth-rbac-completion-design.md` mục "Ghi chú roadmap — Custom Role".
+
+**Vì sao hoãn tới sau Phase 7:** không chặn nghiệp vụ chính (Campaign/Scheduler/Alert/Case đều dùng role cố định là đủ), và cần thời gian xử lý rủi ro thiết kế trước khi code — làm vội sẽ lặp lại đúng sai lầm "code trước khi rule chốt" mà dự án từng gặp.
+
+**Rủi ro cần xử lý trước khi bắt đầu code (không phải chỉ liệt kê, mà phải có quyết định rõ cho từng mục):**
+1. Cập nhật chính thức BR-USER-01 (rule 15) + rule 05 (thêm `POST/PUT/DELETE /api/roles`) — role không còn "5 cố định" mà là "5 mặc định `is_system=true` không xóa được + custom role `is_system=false` tạo được qua UI".
+2. Thêm `GET /api/permissions` — API liệt kê permission khả dụng để UI hiển thị checkbox (hiện chưa tồn tại).
+3. **Không có ràng buộc phụ thuộc giữa permission** ở bất kỳ đâu trong hệ thống hiện tại (mỗi `require_permission()` kiểm tra độc lập) — cần tự thêm 1 bảng ánh xạ nhỏ hardcode (VD `PERMISSION_IMPLIES = {"case.close": ["case.view"]}`), theo đúng triết lý "rule cứng, không xây engine tổng quát" đã áp dụng ở Alert Rule Engine (rule 18) — không có sẵn hạ tầng nào hỗ trợ việc này.
+4. Rủi ro "shadow-admin": role tùy chỉnh gộp đủ permission nhóm Hệ thống (`user.manage/role.manage/audit_log.view/system.configure`) sẽ tương đương ADMIN nhưng khó nhận diện qua tên — cần cảnh báo UI rõ ràng + bắt buộc ghi `audit_logs` khi tạo/sửa role loại này.
+5. Business rule mới cho xóa role đang có user gắn — DB đã có `ON DELETE RESTRICT` (`role_permissions`/`user_roles`) chặn ở tầng DB, nhưng API cần bắt lỗi này và trả message rõ ràng thay vì để lộ lỗi DB thô.
+
+**Đã chuẩn bị sẵn ở Phase 1 (đợt hoàn thiện Auth/RBAC, 2026-07-17):** UI `RoleFormModal` (tạo/sửa role + checkbox chọn permission thật) đã dựng tĩnh, phủ overlay "Đang phát triển", chưa nối API — khi tới lượt Phase 10, chỉ cần xử lý 5 rủi ro trên rồi bỏ overlay + nối API thật.
+
+**Rủi ro:**
+- 🟡 Trung bình — không đụng pipeline crawl/AI, nhưng đụng trực tiếp rule bảo mật/phân quyền đã chốt (BR-USER-01) — cần review kỹ trước khi đổi.
 
 ---
 

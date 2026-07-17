@@ -119,7 +119,9 @@ Thêm `users.router`, `roles.router`, `audit_logs.router` vào `backend/main.py`
 
 ### `System/Roles`
 
-Viết lại `index.tsx` thành read-only: bảng liệt kê 5 role (mã, tên, số user, danh sách permission dạng tag/expand), bỏ hẳn `RoleFormModal`, nút Thêm/Sửa/Tạm ngưng, Import/Export.
+Viết lại `index.tsx`: bảng liệt kê 5 role thật (nối `GET /api/roles` — mã, tên, số user, danh sách permission dạng tag/expand), bỏ nút Import/Export và bỏ toggle Tạm ngưng (không có API).
+
+**Nút "Thêm mới" + `RoleFormModal` — giữ lại nhưng đóng băng ở mức giao diện tĩnh** (quyết định 2026-07-17, xem thêm ghi chú roadmap): thêm vào modal 1 phần chọn permission dạng checkbox (list phẳng 25 permission thật, group theo `resource`, KHÔNG phải cây lồng ảo như `PERM_TREE` cũ) — nhưng toàn bộ modal vẫn giữ hành vi mock hiện có (`message.info('Đây là giao diện minh hoạ...')`, không gọi API thật). Phủ 1 lớp overlay (nền mờ + icon khóa + text **"Đang phát triển"**) lên trên nội dung modal (hoặc lên nút "Thêm mới"/"Sửa" ở bảng danh sách — chọn 1 trong 2 vị trí, ưu tiên overlay ngay trong modal để vẫn xem được giao diện đầy đủ) — ngăn tương tác thật, chỉ để xem trước hình dạng UI. Đây là phần hiện thực **cho tính năng Custom Role** đã quyết định hoãn (xem "Ghi chú roadmap" cuối file) — không kết nối API `POST/PUT/DELETE /api/roles` nào vì các endpoint này chưa tồn tại và chưa được rule 05 định nghĩa.
 
 ### `System/AuditLogs`
 
@@ -140,3 +142,17 @@ Nối `GET /api/audit-logs`: bỏ option filter `LOGOUT/VIEW/EXPORT` (chưa ghi 
 ## Rủi ro / điểm chưa chắc
 
 - Enum `status` (`ACTIVE|LOCKED|INACTIVE`) và cột `is_active` (bool) trên `users` có phần chồng chéo — thiết kế này chỉ dùng `status` làm nguồn sự thật cho UI admin thao tác, `is_active` giữ nguyên logic cũ (login check) và tự động đồng bộ theo `status` (set `is_active=False` khi `status != ACTIVE`) để không phá vỡ `_is_user_usable()` hiện có.
+
+## Ghi chú roadmap — Custom Role (hoãn, không thuộc đợt này)
+
+Trong lúc bàn bạc (2026-07-17), có đề xuất cho phép ADMIN **tạo role tùy chỉnh** qua UI (chọn permission có sẵn qua checkbox, không tự định nghĩa permission mới). Quyết định: **hoãn**, làm sau khi Phase 1 (đợt này) và Report mở rộng (Phase 7 roadmap) hoàn thành — lý do và rủi ro chi tiết đã ghi lại, cần xử lý trước khi triển khai thật:
+
+1. Đụng BR-USER-01 (5 role cố định) + rule 05 (`GET /api/roles` read-only) — cần cập nhật rule 05/15 chính thức trước, không code trước khi sửa rule.
+2. Thiếu `GET /api/permissions` (API liệt kê permission khả dụng cho checkbox) — chưa được định nghĩa ở rule 05.
+3. **Chưa có ràng buộc phụ thuộc giữa các permission** (VD tick `case.close` không tự kéo theo `case.view`) — hệ thống hiện tại (và toàn bộ roadmap đã viết) không có khái niệm này ở bất kỳ đâu, mỗi permission được `require_permission()` kiểm tra độc lập; RBAC matrix hợp lý hiện tại chỉ nhờ người viết rule tự tay đảm bảo. Nếu làm custom role, cần tự thêm 1 bảng ánh xạ phụ thuộc nhỏ hardcode trong code (theo đúng triết lý "rule cứng, không xây engine tổng quát" ở rule 18 Alert Rule Engine), không có sẵn hạ tầng nào hỗ trợ.
+4. Rủi ro "shadow-admin" — role tùy chỉnh gộp đủ permission nhóm Hệ thống (`user.manage/role.manage/audit_log.view/system.configure`) sẽ tương đương ADMIN nhưng khó nhận diện qua tên role — cần cảnh báo UI + ghi audit log khi tạo/sửa role loại này.
+5. Cần business rule mới cho xóa role đang có user gắn (DB đã có `ON DELETE RESTRICT` ở `role_permissions`/`user_roles`, nhưng API cần bắt lỗi và trả message rõ ràng thay vì lỗi DB thô).
+
+**Việc đã làm trước ở đợt này:** UI `RoleFormModal` (tạo/sửa role + checkbox permission) đã dựng sẵn dạng tĩnh, phủ overlay "Đang phát triển", không nối API — xem mục `System/Roles` ở trên. Khi tới lượt làm Custom Role thật, chỉ cần: viết migration/rule/API theo 5 điểm trên, bỏ overlay, nối modal vào API thật.
+
+**Cần thêm vào [docs/ROADMAP_CONTINUOUS_MONITORING.md](../../ROADMAP_CONTINUOUS_MONITORING.md):** thêm 1 mục ngay sau Phase 7 (Report mở rộng) ghi nhận "Custom Role Management" là công việc dự kiến kế tiếp, kèm ngày quyết định và tham chiếu 5 rủi ro trên.
