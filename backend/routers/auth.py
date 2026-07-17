@@ -8,11 +8,13 @@ from slowapi.util import get_remote_address
 from sqlalchemy.orm import Session
 
 from backend.auth.dependencies import _is_user_usable, get_current_user
-from backend.auth.schemas import LoginRequest, RefreshRequest, TokenResponse, UserResponse
+from backend.auth.schemas import ChangePasswordRequest, LoginRequest, RefreshRequest, TokenResponse, UserResponse
 from backend.auth.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    hash_password,
+    is_password_strong,
     verify_password,
 )
 from backend.db import get_db
@@ -43,6 +45,8 @@ def _serialize_user(db: Session, user: User) -> UserResponse:
     return UserResponse(
         user_id=str(user.user_id),
         username=user.username,
+        full_name=user.full_name,
+        email=user.email,
         roles=[r[0] for r in roles],
         permissions=[p[0] for p in permissions],
     )
@@ -113,3 +117,26 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     return _serialize_user(db, user)
+
+
+@router.post("/change-password")
+def change_password(
+    payload: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not verify_password(payload.current_password, user.password_hash):
+        # 400 (không phải 401) — token vẫn hợp lệ, chỉ sai mật khẩu hiện tại; tránh trùng
+        # với 401 mà authFetch() FE hiểu là "token hết hạn" và tự động thử refresh + gọi lại
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không đúng")
+
+    if not is_password_strong(payload.new_password):
+        raise HTTPException(
+            status_code=422,
+            detail="Mật khẩu mới phải có tối thiểu 8 ký tự, gồm chữ hoa, chữ thường và số",
+        )
+
+    user.password_hash = hash_password(payload.new_password)
+    user.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"detail": "Đổi mật khẩu thành công"}

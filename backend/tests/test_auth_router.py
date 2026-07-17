@@ -103,3 +103,53 @@ def test_me_returns_current_user(app_client, user):
     response = app_client.get("/api/auth/me", headers={"Authorization": f"Bearer {access_token}"})
     assert response.status_code == 200
     assert response.json()["username"] == user.username
+
+
+def _login_headers(app_client, user, password="Str0ngPass!"):
+    login_response = app_client.post("/api/auth/login", json={"username": user.username, "password": password})
+    return {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+
+def test_change_password_succeeds_with_correct_current_password(app_client, user):
+    headers = _login_headers(app_client, user)
+    response = app_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "Str0ngPass!", "new_password": "NewStr0ngPass!"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+
+    relogin = app_client.post("/api/auth/login", json={"username": user.username, "password": "NewStr0ngPass!"})
+    assert relogin.status_code == 200
+
+
+def test_change_password_rejects_wrong_current_password(app_client, user):
+    headers = _login_headers(app_client, user)
+    response = app_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "WrongCurrent!", "new_password": "NewStr0ngPass!"},
+        headers=headers,
+    )
+    assert response.status_code == 400
+
+
+def test_change_password_rejects_weak_new_password(app_client, user):
+    headers = _login_headers(app_client, user)
+    response = app_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "Str0ngPass!", "new_password": "weak"},
+        headers=headers,
+    )
+    assert response.status_code == 422
+
+    # Mật khẩu cũ vẫn phải còn dùng được — request bị từ chối không được làm hỏng state
+    relogin = app_client.post("/api/auth/login", json={"username": user.username, "password": "Str0ngPass!"})
+    assert relogin.status_code == 200
+
+
+def test_change_password_requires_authentication(app_client):
+    response = app_client.post(
+        "/api/auth/change-password",
+        json={"current_password": "x", "new_password": "NewStr0ngPass!"},
+    )
+    assert response.status_code in (401, 403)

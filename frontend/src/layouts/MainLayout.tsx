@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Layout, Menu, Avatar, Badge, Typography, Space, Button } from "antd";
+import { Layout, Menu, Avatar, Badge, Typography, Space, Button, Dropdown } from "antd";
+import type { MenuProps } from "antd";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import Logo from "@/components/common/Logo";
 import { useAuth } from "@/lib/AuthContext";
@@ -84,6 +85,21 @@ export default function MainLayout() {
     return keys;
   })();
 
+  const userMenuItems: MenuProps["items"] = [
+    { key: "profile", icon: <UserOutlined />, label: "Thông tin cá nhân" },
+    { type: "divider" },
+    { key: "logout", icon: <LogoutOutlined />, label: "Đăng xuất", danger: true },
+  ];
+
+  function handleUserMenuClick({ key }: { key: string }) {
+    if (key === "logout") {
+      logout();
+      navigate("/login");
+      return;
+    }
+    navigate("/profile");
+  }
+
   return (
     <Layout style={{ minHeight: "100vh" }}>
       <Sider
@@ -95,6 +111,7 @@ export default function MainLayout() {
         style={{ background: "#0A1D55", position: "fixed", height: "100vh", left: 0, top: 0, zIndex: 100, display: "flex", flexDirection: "column" }}
       >
         <div
+          onClick={() => navigate("/")}
           style={{
             height: 72,
             display: "flex",
@@ -104,6 +121,7 @@ export default function MainLayout() {
             borderBottom: "1px solid rgba(255,255,255,0.1)",
             background: "rgba(0,0,0,0.15)",
             flexShrink: 0,
+            cursor: "pointer",
           }}
         >
           <Logo collapsed={collapsed} />
@@ -148,24 +166,20 @@ export default function MainLayout() {
             <Badge count={5} size="small">
               <Button type="text" icon={<BellOutlined style={{ fontSize: 18 }} />} />
             </Badge>
-            <Space style={{ cursor: "default" }}>
-              <Avatar style={{ background: "#00859A" }} size={32} icon={<UserOutlined />} />
-              {!collapsed && (
-                <Typography.Text strong style={{ color: "#0A1D55" }}>
-                  {user?.username}
-                </Typography.Text>
-              )}
-            </Space>
-            <Button
-              type="text"
-              icon={<LogoutOutlined style={{ fontSize: 16 }} />}
-              onClick={() => {
-                logout();
-                navigate("/login");
-              }}
+            <Dropdown
+              menu={{ items: userMenuItems, onClick: handleUserMenuClick }}
+              placement="bottomRight"
+              trigger={["click"]}
             >
-              {!collapsed && "Đăng xuất"}
-            </Button>
+              <Space style={{ cursor: "pointer" }}>
+                <Avatar style={{ background: "#00859A" }} size={32} icon={<UserOutlined />} />
+                {!collapsed && (
+                  <Typography.Text strong style={{ color: "#0A1D55" }}>
+                    {user?.full_name || user?.username}
+                  </Typography.Text>
+                )}
+              </Space>
+            </Dropdown>
           </Space>
         </Header>
 

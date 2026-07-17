@@ -4,6 +4,8 @@ import { API_BASE } from "@/lib/api";
 export type CurrentUser = {
   user_id: string;
   username: string;
+  full_name: string | null;
+  email: string | null;
   roles: string[];
   permissions: string[];
 };

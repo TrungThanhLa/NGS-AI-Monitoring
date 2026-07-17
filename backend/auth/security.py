@@ -1,4 +1,5 @@
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -8,6 +9,16 @@ SECRET_KEY = os.environ["SECRET_KEY"]
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+
+def is_password_strong(plain_password: str) -> bool:
+    """BR-USER-07: tối thiểu 8 ký tự, có chữ hoa/chữ thường/số."""
+    return (
+        len(plain_password) >= 8
+        and re.search(r"[A-Z]", plain_password) is not None
+        and re.search(r"[a-z]", plain_password) is not None
+        and re.search(r"[0-9]", plain_password) is not None
+    )
 
 
 def hash_password(plain_password: str) -> str:

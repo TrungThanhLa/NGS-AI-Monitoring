@@ -15,6 +15,7 @@ import AlertDetail from "@/pages/Alerts/AlertDetail";
 import CasesPage from "@/pages/Cases";
 import CaseForm from "@/pages/Cases/CaseForm";
 import CaseDetail from "@/pages/Cases/CaseDetail";
+import ProfilePage from "@/pages/Profile";
 import ReportsPage from "@/pages/Reports";
 import ReportCreate from "@/pages/Reports/ReportCreate";
 import JobsPage from "@/pages/Jobs";
@@ -36,6 +37,7 @@ export default function App() {
       <Route element={<ProtectedRoute />}>
         <Route element={<MainLayout />}>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
 
           <Route path="/campaigns" element={<CampaignsPage />} />
           <Route path="/campaigns/new" element={<CampaignForm />} />
