@@ -42,13 +42,22 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
   const [form] = Form.useForm()
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([])
   const [submitting, setSubmitting] = useState(false)
+  const [rolesLoading, setRolesLoading] = useState(false)
 
   useEffect(() => {
     if (!open) return
+    setRolesLoading(true)
     authFetch('/api/roles')
-      .then((res) => (res.ok ? res.json() : { roles: [] }))
+      .then((res) => {
+        if (!res.ok) {
+          message.error('Không tải được danh sách vai trò')
+          return { roles: [] }
+        }
+        return res.json()
+      })
       .then((data) => setRoleOptions(data.roles ?? []))
       .catch(() => message.error('Không tải được danh sách vai trò'))
+      .finally(() => setRolesLoading(false))
   }, [open])
 
   useEffect(() => {
@@ -73,10 +82,16 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
   }, [open, editId, isEdit, form, roleOptions.length])
 
   const handleSave = async () => {
+    let values: Awaited<ReturnType<typeof form.validateFields>>
     try {
-      const values = await form.validateFields()
-      setSubmitting(true)
+      values = await form.validateFields()
+    } catch {
+      // validateFields() reject — lỗi đã hiện trên form, không cần message thêm
+      return
+    }
 
+    setSubmitting(true)
+    try {
       const payload = isEdit
         ? {
             full_name: values.full_name,
@@ -108,7 +123,8 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
       onSaved()
       onClose()
     } catch {
-      // validateFields() reject — lỗi đã hiện trên form, không cần message thêm
+      // authFetch/network lỗi — không phải lỗi validate form
+      message.error('Lưu thất bại — lỗi kết nối')
     } finally {
       setSubmitting(false)
     }
@@ -128,7 +144,7 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
       footer={
         <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
           <Button onClick={onClose}>Hủy</Button>
-          <Button type="primary" loading={submitting} onClick={handleSave}>
+          <Button type="primary" loading={submitting} disabled={rolesLoading} onClick={handleSave}>
             Lưu
           </Button>
         </Space>
