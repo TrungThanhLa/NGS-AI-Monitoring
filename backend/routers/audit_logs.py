@@ -36,9 +36,13 @@ def list_audit_logs(
 
     rows = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
 
+    # Gộp lookup User thành 1 query duy nhất thay vì N+1 (audit_logs có thể rất lớn)
+    user_ids = {row.user_id for row in rows if row.user_id}
+    users_by_id = {u.user_id: u for u in db.query(User).filter(User.user_id.in_(user_ids)).all()} if user_ids else {}
+
     result = []
     for row in rows:
-        actor = db.get(User, row.user_id) if row.user_id else None
+        actor = users_by_id.get(row.user_id) if row.user_id else None
         result.append(
             {
                 "audit_id": str(row.audit_id),

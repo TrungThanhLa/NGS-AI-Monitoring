@@ -76,3 +76,34 @@ def test_list_audit_logs_filters_by_action_and_date(app_client, db_session, admi
     assert len(body) == 1
     assert body[0]["action"] == "LOGIN"
     assert body[0]["username"] == admin.username
+
+
+def test_list_audit_logs_date_to_is_inclusive_of_whole_day(app_client, db_session, admin_role):
+    admin = _make_user_with_role(db_session, admin_role)
+    token = create_access_token(str(admin.user_id))
+
+    db_session.add(
+        AuditLog(
+            user_id=admin.user_id,
+            action="LATE_ON_DAY",
+            created_at=datetime(2026, 6, 15, 23, 59, tzinfo=timezone.utc),
+        )
+    )
+    db_session.add(
+        AuditLog(
+            user_id=admin.user_id,
+            action="JUST_AFTER_MIDNIGHT_NEXT_DAY",
+            created_at=datetime(2026, 6, 16, 0, 1, tzinfo=timezone.utc),
+        )
+    )
+    db_session.commit()
+
+    response = app_client.get(
+        "/api/audit-logs",
+        params={"date_to": "2026-06-15"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    body = response.json()["audit_logs"]
+    assert len(body) == 1
+    assert body[0]["action"] == "LATE_ON_DAY"
