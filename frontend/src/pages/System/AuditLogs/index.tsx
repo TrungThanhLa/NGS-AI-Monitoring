@@ -29,6 +29,9 @@ export default function AuditLogsPage() {
   const [error, setError] = useState<string | null>(null)
   const [action, setAction] = useState<string | undefined>()
   const [dateRange, setDateRange] = useState<[string, string] | null>(null)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(20)
+  const [total, setTotal] = useState(0)
 
   useEffect(() => {
     const params = new URLSearchParams()
@@ -37,16 +40,29 @@ export default function AuditLogsPage() {
       params.set('date_from', dateRange[0])
       params.set('date_to', dateRange[1])
     }
+    params.set('offset', String((page - 1) * pageSize))
+    params.set('limit', String(pageSize))
     setLoading(true)
     authFetch(`/api/audit-logs?${params.toString()}`)
-      .then((res) => (res.ok ? res.json() : { audit_logs: [] }))
+      .then((res) => (res.ok ? res.json() : { audit_logs: [], total: 0 }))
       .then((body) => {
         setLogs(body.audit_logs ?? [])
+        setTotal(body.total ?? 0)
         setError(null)
       })
       .catch(() => setError('Không tải được nhật ký hoạt động'))
       .finally(() => setLoading(false))
-  }, [action, dateRange])
+  }, [action, dateRange, page, pageSize])
+
+  // Đổi bộ lọc thì quay về trang 1 — tránh trang hiện tại vượt quá tổng số dòng mới
+  const handleActionChange = (value: string | undefined) => {
+    setAction(value)
+    setPage(1)
+  }
+  const handleDateRangeChange = (value: [string, string] | null) => {
+    setDateRange(value)
+    setPage(1)
+  }
 
   const columns = [
     { title: 'Người dùng', key: 'user', render: (_: unknown, r: LogRow) => r.full_name ?? r.username ?? '—' },
@@ -81,7 +97,7 @@ export default function AuditLogsPage() {
             placeholder="Loại hành động"
             allowClear
             value={action}
-            onChange={setAction}
+            onChange={handleActionChange}
             style={{ width: 160 }}
             options={[
               { value: 'LOGIN', label: 'Đăng nhập' },
@@ -92,13 +108,27 @@ export default function AuditLogsPage() {
           <RangePicker
             format="DD/MM/YYYY"
             onChange={(_, dateStrings) => {
-              if (!dateStrings[0] || !dateStrings[1]) { setDateRange(null); return }
-              setDateRange([dayjs(dateStrings[0], 'DD/MM/YYYY').format('YYYY-MM-DD'), dayjs(dateStrings[1], 'DD/MM/YYYY').format('YYYY-MM-DD')])
+              if (!dateStrings[0] || !dateStrings[1]) { handleDateRangeChange(null); return }
+              handleDateRangeChange([dayjs(dateStrings[0], 'DD/MM/YYYY').format('YYYY-MM-DD'), dayjs(dateStrings[1], 'DD/MM/YYYY').format('YYYY-MM-DD')])
             }}
           />
         </Space>
 
-        <Table columns={columns} dataSource={logs} rowKey="audit_id" loading={loading} pagination={{ pageSize: 20 }} />
+        <Table
+          columns={columns}
+          dataSource={logs}
+          rowKey="audit_id"
+          loading={loading}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            onChange: (nextPage, nextPageSize) => {
+              setPage(nextPage)
+              setPageSize(nextPageSize)
+            },
+          }}
+        />
       </Card>
     </div>
   )

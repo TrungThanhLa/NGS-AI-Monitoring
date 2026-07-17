@@ -22,6 +22,8 @@ class UserCreateRequest(BaseModel):
     role_ids: list[str]
 
 
+# Không filter theo keyword/status/role_code ở server — FE tự lọc client-side. Đây là lựa chọn
+# có chủ đích phù hợp quy mô dự án (rule 15: "<10 người dùng đồng thời"), không phải thiếu sót.
 @router.get("")
 def list_users(db: Session = Depends(get_db), _user: User = Depends(require_permission("user", "manage"))):
     rows = db.query(User).order_by(User.username).all()
@@ -136,6 +138,9 @@ def update_user(
 ):
     target = _get_user_or_404(db, user_id)
 
+    if payload.status is not None and payload.status not in {"ACTIVE", "INACTIVE", "LOCKED"}:
+        raise HTTPException(status_code=400, detail="Trạng thái không hợp lệ")
+
     current_role_codes = {
         r.code for r in db.query(Role).join(UserRole, UserRole.role_id == Role.role_id).filter(UserRole.user_id == target.user_id)
     }
@@ -192,7 +197,7 @@ def update_user(
         "full_name": target.full_name,
         "email": target.email,
         "status": target.status,
-        "roles": payload.role_ids,
+        "roles": [r.code for r in new_roles] if payload.role_ids is not None else list(current_role_codes),
     }
     log_action(
         db,

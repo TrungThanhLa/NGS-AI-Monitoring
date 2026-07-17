@@ -34,6 +34,7 @@ def list_audit_logs(
     if date_to:
         query = query.filter(AuditLog.created_at < date_to + timedelta(days=1))
 
+    total = query.count()
     rows = query.order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
 
     # Gộp lookup User thành 1 query duy nhất thay vì N+1 (audit_logs có thể rất lớn)
@@ -55,4 +56,4 @@ def list_audit_logs(
                 "created_at": row.created_at.isoformat() if row.created_at else None,
             }
         )
-    return {"audit_logs": result}
+    return {"audit_logs": result, "total": total}

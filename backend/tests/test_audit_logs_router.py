@@ -78,6 +78,31 @@ def test_list_audit_logs_filters_by_action_and_date(app_client, db_session, admi
     assert body[0]["username"] == admin.username
 
 
+def test_list_audit_logs_total_reflects_full_count_not_just_page(app_client, db_session, admin_role):
+    admin = _make_user_with_role(db_session, admin_role)
+    token = create_access_token(str(admin.user_id))
+
+    for i in range(3):
+        db_session.add(
+            AuditLog(
+                user_id=admin.user_id,
+                action=f"ACTION_{i}",
+                created_at=datetime.now(timezone.utc) - timedelta(minutes=i),
+            )
+        )
+    db_session.commit()
+
+    response = app_client.get(
+        "/api/audit-logs",
+        params={"limit": 2, "user_id": str(admin.user_id)},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["audit_logs"]) == 2
+    assert body["total"] == 3
+
+
 def test_list_audit_logs_date_to_is_inclusive_of_whole_day(app_client, db_session, admin_role):
     admin = _make_user_with_role(db_session, admin_role)
     token = create_access_token(str(admin.user_id))
