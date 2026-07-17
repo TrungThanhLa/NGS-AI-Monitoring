@@ -1,4 +1,3 @@
-import os
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -10,20 +9,11 @@ from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.auth.security import hash_password, is_password_strong
 from backend.auth.serializers import serialize_user
+from backend.avatar_storage import avatar_file_path, save_uploaded_avatar
 from backend.db import get_db
 from backend.models import Role, User, UserRole
 
 router = APIRouter(prefix="/api/users", tags=["users"])
-
-_ALLOWED_AVATAR_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
-_MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2MB
-
-
-def _avatar_dir() -> str:
-    base = os.environ.get("STORAGE_PATH", "./storage")
-    path = os.path.join(base, "avatars")
-    os.makedirs(path, exist_ok=True)
-    return path
 
 
 class UserCreateRequest(BaseModel):
@@ -242,25 +232,8 @@ def upload_avatar(
 ):
     target = _get_user_or_404(db, user_id)
 
-    ext = _ALLOWED_AVATAR_TYPES.get(file.content_type)
-    if ext is None:
-        raise HTTPException(status_code=422, detail="Chỉ chấp nhận ảnh JPG, PNG hoặc WEBP")
+    save_uploaded_avatar(target, file)
 
-    content = file.file.read()
-    if len(content) > _MAX_AVATAR_SIZE:
-        raise HTTPException(status_code=422, detail="Ảnh không được vượt quá 2MB")
-
-    # Xóa file avatar cũ nếu tồn tại (có thể khác đuôi file với ảnh mới) — tránh rác file mồ côi
-    if target.avatar_path:
-        old_path = os.path.join(_avatar_dir(), target.avatar_path)
-        if os.path.exists(old_path):
-            os.remove(old_path)
-
-    filename = f"{target.user_id}.{ext}"
-    with open(os.path.join(_avatar_dir(), filename), "wb") as out:
-        out.write(content)
-
-    target.avatar_path = filename
     log_action(
         db,
         user_id=current_user.user_id,
@@ -279,9 +252,7 @@ def get_avatar(
     user_id: str, db: Session = Depends(get_db), _user: User = Depends(require_permission("user", "manage"))
 ):
     target = _get_user_or_404(db, user_id)
-    if not target.avatar_path:
+    path = avatar_file_path(target)
+    if path is None:
         raise HTTPException(status_code=404, detail="Người dùng chưa có ảnh đại diện")
-    path = os.path.join(_avatar_dir(), target.avatar_path)
-    if not os.path.exists(path):
-        raise HTTPException(status_code=404, detail="Không tìm thấy file ảnh")
     return FileResponse(path)

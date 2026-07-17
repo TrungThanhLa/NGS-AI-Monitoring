@@ -174,3 +174,64 @@ def test_change_password_writes_audit_log(app_client, user, db_session):
     assert response.status_code == 200
     log = db_session.query(AuditLog).filter_by(user_id=user.user_id, action="UPDATE", entity_type="user").first()
     assert log is not None
+
+
+def test_update_me_updates_own_profile_without_user_manage_permission(app_client, user):
+    # `user` fixture chỉ có role ADMIN qua conftest cục bộ ở file này (xem admin_role/user
+    # fixture) — nhưng test này xác nhận endpoint không yêu cầu permission `user.manage`,
+    # chỉ cần đăng nhập, nên vẫn đúng dù user có role gì
+    from backend.auth.security import create_access_token
+
+    token = create_access_token(str(user.user_id))
+    response = app_client.put(
+        "/api/auth/me",
+        json={"full_name": "Tên Mới", "phone": "0912345678"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["full_name"] == "Tên Mới"
+    assert body["phone"] == "0912345678"
+
+
+def test_update_me_rejects_duplicate_email(app_client, db_session, user, admin_role):
+    from backend.auth.security import create_access_token
+
+    other = User(
+        username=f"other-{uuid.uuid4()}", email="taken@example.com", password_hash=hash_password("Str0ngPass!"), is_active=True, status="ACTIVE"
+    )
+    db_session.add(other)
+    db_session.commit()
+
+    token = create_access_token(str(user.user_id))
+    response = app_client.put(
+        "/api/auth/me", json={"email": "taken@example.com"}, headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 409
+
+
+def test_upload_and_fetch_my_avatar(app_client, user, tmp_path, monkeypatch):
+    from backend.auth.security import create_access_token
+
+    monkeypatch.setenv("STORAGE_PATH", str(tmp_path))
+    token = create_access_token(str(user.user_id))
+    headers = {"Authorization": f"Bearer {token}"}
+
+    upload_response = app_client.post(
+        "/api/auth/me/avatar", files={"file": ("photo.png", b"\x89PNG fake bytes", "image/png")}, headers=headers
+    )
+    assert upload_response.status_code == 200
+    assert upload_response.json()["avatar_url"] == "/api/auth/me/avatar"
+
+    get_response = app_client.get("/api/auth/me/avatar", headers=headers)
+    assert get_response.status_code == 200
+    assert get_response.content == b"\x89PNG fake bytes"
+
+
+def test_get_my_avatar_404_when_not_uploaded(app_client, user, tmp_path, monkeypatch):
+    from backend.auth.security import create_access_token
+
+    monkeypatch.setenv("STORAGE_PATH", str(tmp_path))
+    token = create_access_token(str(user.user_id))
+    response = app_client.get("/api/auth/me/avatar", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 404
