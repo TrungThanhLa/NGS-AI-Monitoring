@@ -17,6 +17,12 @@ type LogRow = {
   created_at: string | null
 }
 
+// Ép tiêu đề cột không xuống dòng — AntD Table wrap tiêu đề khi width cột hẹp hơn
+// text dù bảng còn dư khoảng trống ở cột khác
+function nowrap(title: string) {
+  return <span style={{ whiteSpace: 'nowrap' }}>{title}</span>
+}
+
 const ACTION_COLORS: Record<string, string> = {
   LOGIN: '#1890FF',
   CREATE: '#52C41A',
@@ -65,15 +71,15 @@ export default function AuditLogsPage() {
   }
 
   const columns = [
-    { title: 'Người dùng', key: 'user', render: (_: unknown, r: LogRow) => r.full_name ?? r.username ?? '—' },
+    { title: nowrap('Người dùng'), key: 'user', render: (_: unknown, r: LogRow) => r.full_name ?? r.username ?? '—' },
     {
-      title: 'Hành động', dataIndex: 'action', key: 'action',
+      title: nowrap('Hành động'), dataIndex: 'action', key: 'action',
       render: (v: string) => <span style={{ color: ACTION_COLORS[v] ?? '#1890FF', fontWeight: 500 }}>{v}</span>,
     },
-    { title: 'Đối tượng', dataIndex: 'entity_type', key: 'entity_type', render: (v: string | null) => v ?? '—' },
-    { title: 'IP', dataIndex: 'ip_address', key: 'ip_address', render: (v: string | null) => v ?? '—' },
+    { title: nowrap('Đối tượng'), dataIndex: 'entity_type', key: 'entity_type', render: (v: string | null) => v ?? '—' },
+    { title: nowrap('IP'), dataIndex: 'ip_address', key: 'ip_address', render: (v: string | null) => v ?? '—' },
     {
-      title: 'Thời gian', dataIndex: 'created_at', key: 'created_at',
+      title: nowrap('Thời gian'), dataIndex: 'created_at', key: 'created_at',
       render: (v: string | null) => (v ? dayjs(v).format('DD/MM/YYYY HH:mm') : '—'),
     },
   ]

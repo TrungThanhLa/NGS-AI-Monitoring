@@ -15,6 +15,21 @@ type RoleRow = {
   user_count: number
 }
 
+// Màu cố định cho đúng 5 role hệ thống (rule 15) — không có role nào khác
+const ROLE_COLOR: Record<string, string> = {
+  ADMIN: 'geekblue',
+  MANAGER: 'purple',
+  ANALYST: 'blue',
+  OPERATOR: 'orange',
+  VIEWER: 'default',
+}
+
+// Ép tiêu đề cột không xuống dòng — AntD Table wrap tiêu đề khi width cột hẹp hơn
+// text dù bảng còn dư khoảng trống ở cột khác
+function nowrap(title: string) {
+  return <span style={{ whiteSpace: 'nowrap' }}>{title}</span>
+}
+
 // 25 permission thật (migration 0011/0013) — dùng cho checkbox tĩnh minh họa ở modal
 // "Đang phát triển", KHÔNG phải nguồn dữ liệu để tạo role thật
 const ALL_PERMISSIONS = [
@@ -84,11 +99,11 @@ export default function RolesPage() {
   }, [])
 
   const columns = [
-    { title: 'Mã', dataIndex: 'code', key: 'code', render: (v: string) => <Tag>{v}</Tag> },
-    { title: 'Tên nhóm quyền', dataIndex: 'name', key: 'name' },
-    { title: 'Số người dùng', dataIndex: 'user_count', key: 'user_count', width: 130, align: 'center' as const },
+    { title: nowrap('Mã'), dataIndex: 'code', key: 'code', render: (v: string) => <Tag color={ROLE_COLOR[v] ?? 'default'}>{v}</Tag> },
+    { title: nowrap('Tên nhóm quyền'), dataIndex: 'name', key: 'name' },
+    { title: nowrap('Số người dùng'), dataIndex: 'user_count', key: 'user_count', width: 150, align: 'center' as const },
     {
-      title: 'Quyền', key: 'permissions',
+      title: nowrap('Quyền'), key: 'permissions',
       render: (_: unknown, r: RoleRow) => (
         <Space size={[4, 4]} wrap>
           {r.permissions.map((p) => <Tag key={p} style={{ fontSize: 11 }}>{p}</Tag>)}

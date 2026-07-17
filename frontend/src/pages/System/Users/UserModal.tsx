@@ -1,8 +1,90 @@
-import { useEffect, useState } from 'react'
-import { App, Modal, Form, Input, Select, Switch, Row, Col, Typography, Space, Button } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import { App, Modal, Form, Input, Select, Switch, Row, Col, Typography, Space, Button, Avatar } from 'antd'
+import { UserOutlined, UploadOutlined } from '@ant-design/icons'
 import { authFetch } from '@/lib/api'
 
 const { Text } = Typography
+
+const AVATAR_ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+const AVATAR_MAX_SIZE = 2 * 1024 * 1024 // 2MB
+
+// ─── Avatar upload — chỉ khả dụng ở chế độ sửa (cần user_id đã tồn tại) ────────
+// Upload ngay khi chọn ảnh, tách khỏi payload JSON chính (multipart riêng)
+function AvatarUpload({ userId, avatarUrl }: { userId: string; avatarUrl: string | null }) {
+  const { message } = App.useApp()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  useEffect(() => {
+    if (!avatarUrl) {
+      setPreviewUrl(null)
+      return
+    }
+    let objectUrl: string | null = null
+    authFetch(avatarUrl)
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => {
+        if (!blob) return
+        objectUrl = URL.createObjectURL(blob)
+        setPreviewUrl(objectUrl)
+      })
+      .catch(() => {})
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [avatarUrl])
+
+  const handleFile = async (file: File) => {
+    if (!AVATAR_ALLOWED_TYPES.includes(file.type)) {
+      message.error('Chỉ chấp nhận ảnh JPG, PNG hoặc WEBP')
+      return
+    }
+    if (file.size > AVATAR_MAX_SIZE) {
+      message.error('Ảnh không được vượt quá 2MB')
+      return
+    }
+
+    setUploading(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await authFetch(`/api/users/${userId}/avatar`, { method: 'POST', body: formData })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ detail: 'Tải ảnh thất bại' }))
+        message.error(body.detail ?? 'Tải ảnh thất bại')
+        return
+      }
+      setPreviewUrl(URL.createObjectURL(file))
+      message.success('Cập nhật ảnh đại diện thành công')
+    } catch {
+      message.error('Tải ảnh thất bại — lỗi kết nối')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) handleFile(file)
+    e.target.value = ''
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <input ref={inputRef} type="file" accept=".jpg,.jpeg,.png,.webp" style={{ display: 'none' }} onChange={handleInputChange} />
+      {previewUrl ? (
+        <img src={previewUrl} alt="avatar" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'cover' }} />
+      ) : (
+        <Avatar size={56} style={{ background: '#00859A', borderRadius: 8 }} icon={<UserOutlined />} />
+      )}
+      <Button size="small" icon={<UploadOutlined />} loading={uploading} onClick={() => inputRef.current?.click()}>
+        {previewUrl ? 'Thay ảnh' : 'Chọn ảnh'}
+      </Button>
+      <Text type="secondary" style={{ fontSize: 12 }}>JPG, PNG, WEBP — tối đa 2MB</Text>
+    </div>
+  )
+}
 
 const PASSWORD_RULES = [
   { required: true, message: 'Vui lòng nhập mật khẩu' },
@@ -25,6 +107,8 @@ type UserDetail = {
   username: string
   full_name: string | null
   email: string | null
+  phone: string | null
+  avatar_url: string | null
   status: string
   roles: string[]
 }
@@ -43,6 +127,7 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
   const [roleOptions, setRoleOptions] = useState<RoleOption[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [rolesLoading, setRolesLoading] = useState(false)
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
@@ -70,14 +155,17 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
             full_name: u.full_name,
             username: u.username,
             email: u.email,
+            phone: u.phone,
             status: u.status === 'ACTIVE',
             role_ids: roleOptions.filter((r) => u.roles.includes(r.code)).map((r) => r.role_id),
           })
+          setAvatarUrl(u.avatar_url)
         })
         .catch(() => message.error('Không tải được thông tin người dùng'))
     } else {
       form.resetFields()
       form.setFieldsValue({ status: true })
+      setAvatarUrl(null)
     }
   }, [open, editId, isEdit, form, roleOptions.length])
 
@@ -96,6 +184,7 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
         ? {
             full_name: values.full_name,
             email: values.email,
+            phone: values.phone || null,
             status: values.status ? 'ACTIVE' : 'INACTIVE',
             role_ids: values.role_ids,
           }
@@ -103,6 +192,7 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
             username: values.username,
             email: values.email,
             full_name: values.full_name,
+            phone: values.phone || null,
             password: values.password,
             role_ids: values.role_ids,
           }
@@ -151,6 +241,12 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
       }
     >
       <Form form={form} layout="vertical" scrollToFirstError>
+        {isEdit && editId && (
+          <Form.Item label="Ảnh đại diện" style={{ marginBottom: 20 }}>
+            <AvatarUpload userId={editId} avatarUrl={avatarUrl} />
+          </Form.Item>
+        )}
+
         <Row gutter={12}>
           <Col span={12}>
             <Form.Item name="full_name" label={<>Họ và tên <Text type="danger">*</Text></>} rules={[{ required: true, message: 'Bắt buộc nhập họ tên' }]}>
@@ -172,9 +268,22 @@ export default function UserModal({ open, editId, onClose, onSaved }: Props) {
           </Col>
         </Row>
 
-        <Form.Item name="email" label={<>Email <Text type="danger">*</Text></>} rules={[{ required: true }, { type: 'email', message: 'Email không hợp lệ' }]}>
-          <Input placeholder="Nhập email" />
-        </Form.Item>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="email" label={<>Email <Text type="danger">*</Text></>} rules={[{ required: true }, { type: 'email', message: 'Email không hợp lệ' }]}>
+              <Input placeholder="Nhập email" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              name="phone"
+              label="Số điện thoại"
+              rules={[{ pattern: /^[0-9+\s-]{8,15}$/, message: 'Số điện thoại không hợp lệ' }]}
+            >
+              <Input placeholder="Nhập số điện thoại (không bắt buộc)" />
+            </Form.Item>
+          </Col>
+        </Row>
 
         {!isEdit && (
           <Row gutter={12}>

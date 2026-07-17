@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { App, Avatar, Button, Input, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
-import { PlusOutlined, SearchOutlined, EditOutlined, LockOutlined, UnlockOutlined, ReloadOutlined } from '@ant-design/icons'
+import { PlusOutlined, SearchOutlined, EditOutlined, LockOutlined, UnlockOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons'
 import { authFetch } from '@/lib/api'
 import UserModal from './UserModal'
 import dayjs from 'dayjs'
@@ -12,6 +12,7 @@ type UserRow = {
   username: string
   full_name: string | null
   email: string | null
+  avatar_url: string | null
   status: string
   roles: string[]
   last_login_at: string | null
@@ -21,6 +22,55 @@ const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
   ACTIVE: { color: 'success', label: 'Đang hoạt động' },
   INACTIVE: { color: 'default', label: 'Không hoạt động' },
   LOCKED: { color: 'warning', label: 'Tạm khóa' },
+}
+
+// Màu cố định cho đúng 5 role hệ thống (rule 15) — không có role nào khác
+const ROLE_COLOR: Record<string, string> = {
+  ADMIN: 'geekblue',
+  MANAGER: 'purple',
+  ANALYST: 'blue',
+  OPERATOR: 'orange',
+  VIEWER: 'default',
+}
+
+// Ép tiêu đề cột không xuống dòng — AntD Table wrap tiêu đề khi width cột hẹp hơn
+// text dù bảng còn dư khoảng trống ở cột khác
+function nowrap(title: string) {
+  return <span style={{ whiteSpace: 'nowrap' }}>{title}</span>
+}
+
+// Avatar thật (fetch qua authFetch vì endpoint yêu cầu JWT) — fallback về initials nếu
+// chưa có avatar_url hoặc tải lỗi
+function UserAvatar({ row }: { row: UserRow }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!row.avatar_url) {
+      setImgUrl(null)
+      return
+    }
+    let objectUrl: string | null = null
+    authFetch(row.avatar_url)
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => {
+        if (!blob) return
+        objectUrl = URL.createObjectURL(blob)
+        setImgUrl(objectUrl)
+      })
+      .catch(() => {})
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [row.avatar_url])
+
+  if (imgUrl) {
+    return <Avatar size={32} src={imgUrl} />
+  }
+  return (
+    <Avatar size={32} style={{ background: '#00859A', fontSize: 13, fontWeight: 600 }} icon={!row.full_name && !row.username ? <UserOutlined /> : undefined}>
+      {(row.full_name ?? row.username).slice(0, 2).toUpperCase()}
+    </Avatar>
+  )
 }
 
 export default function UsersPage() {
@@ -69,35 +119,33 @@ export default function UsersPage() {
 
   const columns = [
     {
-      title: 'Họ và tên', key: 'full_name',
+      title: nowrap('Họ và tên'), key: 'full_name',
       render: (_: unknown, r: UserRow) => (
         <Space size={10}>
-          <Avatar size={32} style={{ background: '#00859A', fontSize: 13, fontWeight: 600 }}>
-            {(r.full_name ?? r.username).slice(0, 2).toUpperCase()}
-          </Avatar>
+          <UserAvatar row={r} />
           <Text strong style={{ fontSize: 13 }}>{r.full_name ?? '—'}</Text>
         </Space>
       ),
     },
-    { title: 'Tên đăng nhập', dataIndex: 'username', key: 'username' },
-    { title: 'Email', dataIndex: 'email', key: 'email', render: (v: string | null) => v ?? '—' },
+    { title: nowrap('Tên đăng nhập'), dataIndex: 'username', key: 'username' },
+    { title: nowrap('Email'), dataIndex: 'email', key: 'email', render: (v: string | null) => v ?? '—' },
     {
-      title: 'Vai trò', key: 'roles',
-      render: (_: unknown, r: UserRow) => r.roles.map((code) => <Tag key={code}>{code}</Tag>),
+      title: nowrap('Vai trò'), key: 'roles',
+      render: (_: unknown, r: UserRow) => r.roles.map((code) => <Tag key={code} color={ROLE_COLOR[code] ?? 'default'}>{code}</Tag>),
     },
     {
-      title: 'Trạng thái', dataIndex: 'status', key: 'status', width: 140,
+      title: nowrap('Trạng thái'), dataIndex: 'status', key: 'status', width: 150,
       render: (v: string) => {
         const cfg = STATUS_CONFIG[v] ?? STATUS_CONFIG.INACTIVE
         return <Tag color={cfg.color}>{cfg.label}</Tag>
       },
     },
     {
-      title: 'Lần đăng nhập cuối', dataIndex: 'last_login_at', key: 'last_login_at', width: 155,
+      title: nowrap('Lần đăng nhập cuối'), dataIndex: 'last_login_at', key: 'last_login_at', width: 175,
       render: (v: string | null) => (v ? dayjs(v).format('DD/MM/YYYY HH:mm') : <Text type="secondary">Chưa đăng nhập</Text>),
     },
     {
-      title: 'Thao tác', key: 'actions', width: 80,
+      title: nowrap('Thao tác'), key: 'actions', width: 80,
       render: (_: unknown, r: UserRow) => (
         <Space size={2}>
           <Tooltip title="Chỉnh sửa">
