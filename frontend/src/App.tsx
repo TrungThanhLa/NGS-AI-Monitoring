@@ -60,14 +60,37 @@ export default function App() {
           <Route path="/reports/create" element={<ReportCreate />} />
 
           <Route path="/jobs" element={<JobsPage />} />
+        </Route>
+      </Route>
 
+      <Route element={<ProtectedRoute permission="user.manage" />}>
+        <Route element={<MainLayout />}>
           <Route path="/system/users" element={<UsersPage />} />
+        </Route>
+      </Route>
+
+      <Route element={<ProtectedRoute permission="role.manage" />}>
+        <Route element={<MainLayout />}>
           <Route path="/system/roles" element={<RolesPage />} />
+        </Route>
+      </Route>
+
+      <Route element={<ProtectedRoute permission="audit_log.view" />}>
+        <Route element={<MainLayout />}>
+          <Route path="/system/audit-logs" element={<AuditLogsPage />} />
+        </Route>
+      </Route>
+
+      <Route element={<ProtectedRoute permission="system.configure" />}>
+        <Route element={<MainLayout />}>
           <Route path="/system/master-data" element={<MasterDataPage />} />
           <Route path="/system/settings" element={<SystemSettings />} />
-          <Route path="/system/audit-logs" element={<AuditLogsPage />} />
           <Route path="/system/connectors" element={<ConnectorsPage />} />
+        </Route>
+      </Route>
 
+      <Route element={<ProtectedRoute />}>
+        <Route element={<MainLayout />}>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Route>

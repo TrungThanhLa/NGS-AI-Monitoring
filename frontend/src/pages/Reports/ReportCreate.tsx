@@ -3,6 +3,7 @@ import { Button, Card, DatePicker, Space, Table, Tag, Alert, Progress, Popconfir
 import dayjs, { Dayjs } from "dayjs";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
+import PermissionGuard from "@/components/common/PermissionGuard";
 import { authFetch } from "@/lib/api";
 import SourceSidebar, { SourceItem } from "./SourceSidebar";
 import SummaryCard from "./SummaryCard";
@@ -243,9 +244,11 @@ export default function ReportCreate() {
           </div>
 
           <Space>
-            <Button type="primary" disabled={disabled} loading={submitting} onClick={handleSubmit}>
-              Tạo báo cáo
-            </Button>
+            <PermissionGuard permission="report.create">
+              <Button type="primary" disabled={disabled} loading={submitting} onClick={handleSubmit}>
+                Tạo báo cáo
+              </Button>
+            </PermissionGuard>
             <Button onClick={() => navigate("/reports")}>Hủy</Button>
           </Space>
 

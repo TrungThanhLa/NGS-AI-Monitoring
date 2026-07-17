@@ -53,11 +53,36 @@ const MENU_ITEMS = [
   },
 ];
 
+const SYSTEM_SUBMENU_PERMISSION: Record<string, string> = {
+  "/system/users": "user.manage",
+  "/system/roles": "role.manage",
+  "/system/audit-logs": "audit_log.view",
+  "/system/master-data": "system.configure",
+  "/system/settings": "system.configure",
+  "/system/connectors": "system.configure",
+};
+
+function filterMenuByPermission(items: typeof MENU_ITEMS, permissions: string[]): typeof MENU_ITEMS {
+  return items
+    .map((item) => {
+      if (item.children) {
+        const children = filterMenuByPermission(item.children as typeof MENU_ITEMS, permissions);
+        if (children.length === 0) return null;
+        return { ...item, children };
+      }
+      const required = SYSTEM_SUBMENU_PERMISSION[item.key];
+      if (required && !permissions.includes(required)) return null;
+      return item;
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
 export default function MainLayout() {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
+  const visibleMenuItems = filterMenuByPermission(MENU_ITEMS, user?.permissions ?? []);
 
   const selectedKey = (() => {
     const path = location.pathname;
@@ -133,7 +158,7 @@ export default function MainLayout() {
             mode="inline"
             selectedKeys={selectedKey}
             defaultOpenKeys={openKeys}
-            items={MENU_ITEMS}
+            items={visibleMenuItems}
             onClick={({ key }) => navigate(key)}
             style={{ background: "#0A1D55", border: "none", marginTop: 8 }}
           />
