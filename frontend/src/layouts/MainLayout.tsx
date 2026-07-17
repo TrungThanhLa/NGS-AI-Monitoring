@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Layout, Menu, Avatar, Badge, Typography, Space, Button, Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import Logo from "@/components/common/Logo";
 import { useAuth } from "@/lib/AuthContext";
+import { authFetch } from "@/lib/api";
 import {
   DashboardOutlined,
   RadarChartOutlined,
@@ -83,6 +84,29 @@ export default function MainLayout() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const visibleMenuItems = filterMenuByPermission(MENU_ITEMS, user?.permissions ?? []);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.avatar_url) {
+      setAvatarPreview(null);
+      return;
+    }
+    let objectUrl: string | null = null;
+    authFetch(user.avatar_url)
+      .then((res) => (res.ok ? res.blob() : null))
+      .then((blob) => {
+        if (!blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setAvatarPreview(objectUrl);
+      })
+      .catch(() => {});
+    return () => {
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+    // Phụ thuộc cả `user` (không chỉ avatar_url) — avatar_url là URL endpoint cố định
+    // (VD "/api/auth/me/avatar"), không đổi giữa các lần upload lại ảnh, nên nếu chỉ phụ
+    // thuộc avatar_url thì sau khi refreshUser() (đổi ảnh mới) effect sẽ không chạy lại
+  }, [user]);
 
   const selectedKey = (() => {
     const path = location.pathname;
@@ -197,7 +221,7 @@ export default function MainLayout() {
               trigger={["click"]}
             >
               <Space style={{ cursor: "pointer" }}>
-                <Avatar style={{ background: "#00859A" }} size={32} icon={<UserOutlined />} />
+                <Avatar style={{ background: "#00859A" }} size={32} src={avatarPreview ?? undefined} icon={<UserOutlined />} />
                 {!collapsed && (
                   <Typography.Text strong style={{ color: "#0A1D55" }}>
                     {user?.full_name || user?.username}
