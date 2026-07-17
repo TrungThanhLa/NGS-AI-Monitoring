@@ -77,9 +77,7 @@ Campaign (thay thế hoàn toàn `jobs`), Scheduler crawl liên tục, Content r
 | Crawl xử lý linh hoạt theo từng nguồn thay vì 1 cơ chế chung: lọc lại `published_at` thật sau fetch (không tin tuyệt đối sitemap `<lastmod>`), `_SITEMAP_DATE_PATTERNS` theo domain, `_get_candidates()` ưu tiên `parsing_rules.listing_pages` nếu có dù vẫn còn `sitemap_url`, 1 số site xử lý riêng ngoài sitemap (chuyên mục/CSS selector) | Mỗi nguồn báo có đặc thù khác nhau (format ngày, độ tin cậy sitemap, cấu trúc URL) — VD bocongan.gov.vn ghi `<lastmod>` giống nhau cho mọi URL, không phải ngày đăng thật; thêm nguồn mới = thêm 1 entry cấu hình, không ảnh hưởng nguồn khác |
 | Listing-page crawler chỉ hỗ trợ 1 trang, không phân trang | Hiện không còn nguồn thật nào dùng — giữ lại làm fallback tổng quát (YAGNI) |
 | Chỉ giữ `/sources` và `/reports` (2 trang) nối API thật; mọi trang khác (Dashboard, Campaigns, Contents, Alerts, Cases, Jobs, System/*) là mock UI-only |
-| Phase 1 Auth & RBAC thu hẹp scope còn "Auth core + seed 1 ADMIN" | Tránh làm luôn CRUD user/role (vốn cần UI riêng, ít khẩn cấp hơn) trước khi có Campaign — mở khóa được toàn bộ middleware `require_permission` cho các module sau mà không cần chờ UI quản trị user hoàn chỉnh |
 | `SEED_ADMIN_PASSWORD`/`SECRET_KEY` bắt buộc qua biến môi trường, không có fallback hardcode trong code | Đúng BR-SEC-02 — tránh lộ secret mặc định vào git dù chỉ là placeholder |
-| Login page: chỉ port UI (Card/gradient/logo) từ `ngs-monitor-ui/`, không port state management (`@tanstack/react-query`/`zustand`) | Rule 09 cấm 2 thư viện này cho project — giữ nguyên `AuthContext` đã review, tránh trộn 2 kiến trúc quản lý state khác nhau trong cùng 1 app |
 | Không xây tính năng tạo Role tùy chỉnh (checkbox permission) ngay — giữ nguyên 5 vai trò cố định trong code, dời custom role sang Phase 10 riêng | Cần làm rõ ràng buộc giữa các permission trước (permission nào phụ thuộc/loại trừ permission nào) — chưa đủ dữ liệu vận hành để thiết kế đúng; UI tạo role vẫn giữ dạng tĩnh (checkbox picker) sau lớp overlay "Đang phát triển", không xóa hẳn, để tái dùng khi tới Phase 10 |
 
 ### Vấn đề cần làm rõ (chưa chốt)
@@ -89,5 +87,5 @@ Campaign (thay thế hoàn toàn `jobs`), Scheduler crawl liên tục, Content r
 
 Chi tiết đầy đủ đã chuyển ra file riêng — mục này chỉ giữ bản tóm tắt trạng thái. **Đây là MỘT lộ trình sửa/bổ sung code hiện tại về đúng nghiệp vụ, không phải 2 lộ trình của 2 giai đoạn sản phẩm khác nhau:**
 
-- [docs/ROADMAP_MVP.md](docs/ROADMAP_MVP.md) — **nhật ký lịch sử** những gì đã hiện thực được tới nay (Slice 0–5, chạy thật trên `main`; Slice 6 đã bỏ khỏi scope 2026-07-16). Dùng để biết code hiện có tới đâu, không phải mô tả một sản phẩm hoàn chỉnh.
+- [docs/ROADMAP_MVP.md](docs/ROADMAP_MVP.md) — **nhật ký lịch sử** những gì đã hiện thực được tới nay (Slice 0–5. Dùng để biết code hiện có tới đâu, không phải mô tả một sản phẩm hoàn chỉnh.
 - [docs/ROADMAP_CONTINUOUS_MONITORING.md](docs/ROADMAP_CONTINUOUS_MONITORING.md) — lộ trình Phase 0–9 để sửa/bổ sung code hiện tại cho khớp nghiệp vụ đúng, đặc tả đầy đủ ở rule [15](.claude/rules/15-auth-rbac.md)–[18](.claude/rules/18-alert-case-management.md). Phase 0 (chốt phạm vi) đã hoàn thành 2026-07-16 — sẵn sàng bắt đầu Phase 1 (Auth & RBAC) khi có quyết định triển khai.
