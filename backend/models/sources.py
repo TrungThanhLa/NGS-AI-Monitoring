@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Boolean, Column, String, TIMESTAMP
+from sqlalchemy import Boolean, Column, Integer, String, TIMESTAMP
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
@@ -19,4 +19,8 @@ class Source(Base):
     listing_url = Column(String)
     parsing_rules = Column(JSONB, server_default="{}")
     is_active = Column(Boolean, server_default="true")
+    crawl_frequency = Column(Integer, server_default="1800")
+    last_crawled_at = Column(TIMESTAMP)
+    status = Column(String(30), server_default="ACTIVE")
+    consecutive_error_count = Column(Integer, server_default="0")
     created_at = Column(TIMESTAMP, server_default=func.now())
