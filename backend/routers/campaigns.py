@@ -174,3 +174,104 @@ def get_campaign(
 ):
     campaign = _get_campaign_or_404(db, campaign_id)
     return _serialize_campaign(db, campaign)
+
+
+class CampaignUpdateRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    objective: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    mode: str | None = None
+    alert_threshold: int | None = None
+    source_ids: list[str] | None = None
+    keyword_ids: list[str] | None = None
+
+
+@router.put("/{campaign_id}")
+def update_campaign(
+    campaign_id: str,
+    payload: CampaignUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("campaign", "update")),
+):
+    campaign = _get_campaign_or_404(db, campaign_id)
+
+    # BR-CAMP-04: chiến dịch ARCHIVED chỉ được xem, không được sửa
+    if campaign.status == "ARCHIVED":
+        raise HTTPException(status_code=400, detail="Chiến dịch đã lưu trữ (ARCHIVED), không thể sửa (BR-CAMP-04)")
+
+    old_value = {"name": campaign.name, "status": campaign.status}
+
+    if payload.name is not None:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Tên chiến dịch không được để trống (BR-CAMP-01)")
+        campaign.name = name
+    if payload.description is not None:
+        campaign.description = payload.description
+    if payload.objective is not None:
+        campaign.objective = payload.objective
+    if payload.start_date is not None:
+        campaign.start_date = payload.start_date
+    if payload.end_date is not None:
+        campaign.end_date = payload.end_date
+    if payload.mode is not None:
+        if payload.mode not in _VALID_MODES:
+            raise HTTPException(status_code=400, detail=f"mode phải là 1 trong {_VALID_MODES}")
+        campaign.mode = payload.mode
+    if payload.alert_threshold is not None:
+        campaign.alert_threshold = payload.alert_threshold
+
+    if payload.source_ids is not None:
+        sources = _resolve_sources(db, payload.source_ids)
+        db.query(CampaignSource).filter_by(campaign_id=campaign.campaign_id).delete()
+        for s in sources:
+            db.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=s.source_id))
+    if payload.keyword_ids is not None:
+        kws = _resolve_keywords(db, payload.keyword_ids)
+        db.query(CampaignKeyword).filter_by(campaign_id=campaign.campaign_id).delete()
+        for k in kws:
+            db.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=k.keyword_id))
+
+    log_action(
+        db,
+        user_id=current_user.user_id,
+        action="UPDATE",
+        entity_type="campaign",
+        entity_id=campaign.campaign_id,
+        old_value=old_value,
+        new_value={"name": campaign.name, "status": campaign.status},
+    )
+    db.commit()
+
+    return _serialize_campaign(db, campaign)
+
+
+@router.delete("/{campaign_id}")
+def delete_campaign(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("campaign", "archive")),
+):
+    campaign = _get_campaign_or_404(db, campaign_id)
+
+    # BR-CAMP-05: không xóa vật lý, chỉ chuyển ARCHIVED (dừng crawl, giữ nguyên dữ liệu cũ)
+    if campaign.status == "ARCHIVED":
+        raise HTTPException(status_code=400, detail="Chiến dịch đã ở trạng thái ARCHIVED")
+
+    old_status = campaign.status
+    campaign.status = "ARCHIVED"
+
+    log_action(
+        db,
+        user_id=current_user.user_id,
+        action="DELETE",
+        entity_type="campaign",
+        entity_id=campaign.campaign_id,
+        old_value={"status": old_status},
+        new_value={"status": "ARCHIVED"},
+    )
+    db.commit()
+
+    return _serialize_campaign(db, campaign)

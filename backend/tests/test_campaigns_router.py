@@ -171,3 +171,56 @@ def test_get_campaign_detail_returns_full_info(app_client, admin_user, source, k
     assert body["name"] == "Chi tiết"
     assert body["source_ids"] == [str(source.source_id)]
     assert body["keyword_ids"] == [str(keyword.keyword_id)]
+
+
+def test_update_campaign_changes_fields(app_client, admin_user, source, keyword):
+    create_response = app_client.post(
+        "/api/campaigns", json={"name": "Trước sửa", "start_date": "2026-08-01", "owner_id": str(admin_user.user_id)}
+    )
+    campaign_id = create_response.json()["campaign_id"]
+
+    response = app_client.put(
+        f"/api/campaigns/{campaign_id}",
+        json={"name": "Sau sửa", "source_ids": [str(source.source_id)], "keyword_ids": [str(keyword.keyword_id)]},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["name"] == "Sau sửa"
+    assert body["source_ids"] == [str(source.source_id)]
+    assert body["keyword_ids"] == [str(keyword.keyword_id)]
+
+
+def test_update_campaign_rejects_when_archived(app_client, admin_user, db_session):
+    campaign = Campaign(name="Đã archive", owner_id=admin_user.user_id, status="ARCHIVED", start_date=date(2026, 8, 1))
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.put(f"/api/campaigns/{campaign.campaign_id}", json={"name": "Sửa sau archive"})
+
+    assert response.status_code == 400  # BR-CAMP-04: ARCHIVED chỉ được xem, không được sửa
+
+
+def test_delete_campaign_soft_deletes_to_archived(app_client, admin_user):
+    create_response = app_client.post(
+        "/api/campaigns", json={"name": "Sẽ archive", "start_date": "2026-08-01", "owner_id": str(admin_user.user_id)}
+    )
+    campaign_id = create_response.json()["campaign_id"]
+
+    response = app_client.delete(f"/api/campaigns/{campaign_id}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ARCHIVED"
+
+    detail = app_client.get(f"/api/campaigns/{campaign_id}")
+    assert detail.json()["status"] == "ARCHIVED"  # BR-CAMP-05: không xóa vật lý
+
+
+def test_delete_campaign_already_archived_returns_400(app_client, admin_user, db_session):
+    campaign = Campaign(name="Archived rồi", owner_id=admin_user.user_id, status="ARCHIVED", start_date=date(2026, 8, 1))
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.delete(f"/api/campaigns/{campaign.campaign_id}")
+
+    assert response.status_code == 400
