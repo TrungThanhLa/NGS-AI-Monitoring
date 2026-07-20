@@ -6,7 +6,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy import text
 
 from backend.db import engine
-from backend.routers import audit_logs, auth, reports, roles, sources, users
+from backend.routers import audit_logs, auth, keywords, reports, roles, sources, users
 from backend.routers.auth import limiter
 
 app = FastAPI(title="NGS Monitor API")
@@ -24,6 +24,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(reports.router)
 app.include_router(sources.router)
+app.include_router(keywords.router)
 app.include_router(users.router)
 app.include_router(roles.router)
 app.include_router(audit_logs.router)
