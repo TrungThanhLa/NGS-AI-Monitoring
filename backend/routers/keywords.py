@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -33,6 +33,7 @@ class KeywordCreateRequest(BaseModel):
 @router.post("", status_code=201)
 def create_keyword(
     payload: KeywordCreateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("campaign", "create")),
 ):
@@ -51,6 +52,7 @@ def create_keyword(
         entity_type="keyword",
         entity_id=new_keyword.keyword_id,
         new_value={"keyword": keyword_text, "topic_group": payload.topic_group},
+        request=request,
     )
     db.commit()
 

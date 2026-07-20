@@ -285,3 +285,25 @@ def test_pause_campaign_succeeds_from_active(app_client, admin_user, db_session)
 
     assert response.status_code == 200
     assert response.json()["status"] == "PAUSED"
+
+
+def test_create_campaign_allows_duplicate_source_and_keyword_ids(app_client, admin_user, source, keyword):
+    # Payload có ID trùng lặp (VD FE gửi nhầm 2 lần cùng 1 source_id) vẫn phải được chấp nhận —
+    # trước fix, so sánh len(sources) != len(source_ids) sai vì query DB tự dedup theo PK,
+    # khiến input hợp lệ bị từ chối oan với lỗi "Có source_id không tồn tại"
+    response = app_client.post(
+        "/api/campaigns",
+        json={
+            "name": "Chiến dịch ID trùng lặp",
+            "start_date": "2026-08-01",
+            "owner_id": str(admin_user.user_id),
+            "mode": "ONE_SHOT",
+            "source_ids": [str(source.source_id), str(source.source_id)],
+            "keyword_ids": [str(keyword.keyword_id), str(keyword.keyword_id)],
+        },
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["source_ids"] == [str(source.source_id)]
+    assert body["keyword_ids"] == [str(keyword.keyword_id)]

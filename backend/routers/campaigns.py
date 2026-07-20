@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -73,7 +73,7 @@ def _resolve_sources(db: Session, source_ids: list[str]) -> list[Source]:
     except ValueError:
         raise HTTPException(status_code=400, detail="Có source_id không hợp lệ")
     sources = db.query(Source).filter(Source.source_id.in_(uuids)).all()
-    if len(sources) != len(source_ids):
+    if len(sources) != len(set(uuids)):
         raise HTTPException(status_code=400, detail="Có source_id không tồn tại")
     return sources
 
@@ -84,7 +84,7 @@ def _resolve_keywords(db: Session, keyword_ids: list[str]) -> list[Keyword]:
     except ValueError:
         raise HTTPException(status_code=400, detail="Có keyword_id không hợp lệ")
     kws = db.query(Keyword).filter(Keyword.keyword_id.in_(uuids)).all()
-    if len(kws) != len(keyword_ids):
+    if len(kws) != len(set(uuids)):
         raise HTTPException(status_code=400, detail="Có keyword_id không tồn tại")
     return kws
 
@@ -92,6 +92,7 @@ def _resolve_keywords(db: Session, keyword_ids: list[str]) -> list[Keyword]:
 @router.post("", status_code=201)
 def create_campaign(
     payload: CampaignCreateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("campaign", "create")),
 ):
@@ -141,6 +142,7 @@ def create_campaign(
         entity_type="campaign",
         entity_id=new_campaign.campaign_id,
         new_value={"name": name, "mode": payload.mode, "source_ids": payload.source_ids, "keyword_ids": payload.keyword_ids},
+        request=request,
     )
     db.commit()
 
@@ -192,6 +194,7 @@ class CampaignUpdateRequest(BaseModel):
 def update_campaign(
     campaign_id: str,
     payload: CampaignUpdateRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("campaign", "update")),
 ):
@@ -242,6 +245,7 @@ def update_campaign(
         entity_id=campaign.campaign_id,
         old_value=old_value,
         new_value={"name": campaign.name, "status": campaign.status},
+        request=request,
     )
     db.commit()
 
@@ -251,6 +255,7 @@ def update_campaign(
 @router.delete("/{campaign_id}")
 def delete_campaign(
     campaign_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("campaign", "archive")),
 ):
@@ -271,6 +276,7 @@ def delete_campaign(
         entity_id=campaign.campaign_id,
         old_value={"status": old_status},
         new_value={"status": "ARCHIVED"},
+        request=request,
     )
     db.commit()
 
@@ -280,6 +286,7 @@ def delete_campaign(
 @router.post("/{campaign_id}/activate")
 def activate_campaign(
     campaign_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("campaign", "update")),
 ):
@@ -311,6 +318,7 @@ def activate_campaign(
         entity_id=campaign.campaign_id,
         old_value={"status": old_status},
         new_value={"status": "ACTIVE"},
+        request=request,
     )
     db.commit()
 
@@ -320,6 +328,7 @@ def activate_campaign(
 @router.post("/{campaign_id}/pause")
 def pause_campaign(
     campaign_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("campaign", "update")),
 ):
@@ -341,6 +350,7 @@ def pause_campaign(
         entity_id=campaign.campaign_id,
         old_value={"status": "ACTIVE"},
         new_value={"status": "PAUSED"},
+        request=request,
     )
     db.commit()
 
