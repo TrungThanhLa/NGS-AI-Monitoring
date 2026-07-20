@@ -14,6 +14,7 @@ class Source(Base):
     name = Column(String(255), nullable=False)
     domain = Column(String(255), nullable=False, unique=True)
     group_name = Column(String(255), nullable=False)
+    source_group = Column(String(255))
     sitemap_url = Column(String)
     listing_url = Column(String)
     parsing_rules = Column(JSONB, server_default="{}")
