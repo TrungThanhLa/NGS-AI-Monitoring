@@ -1,11 +1,17 @@
-from fastapi import APIRouter, Depends
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
-from backend.models import Source
+from backend.models import Source, User
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
+
+_VALID_SOURCE_STATUSES = {"ACTIVE", "INACTIVE"}
 
 
 @router.get("")
@@ -19,7 +25,77 @@ def list_sources(db: Session = Depends(get_db), _user=Depends(require_permission
                 "name": s.name,
                 "domain": s.domain,
                 "group_name": s.group_name,
+                "source_group": s.source_group,
+                "crawl_frequency": s.crawl_frequency,
+                "status": s.status,
             }
             for s in rows
         ]
+    }
+
+
+class SourceUpdateRequest(BaseModel):
+    source_group: str | None = None
+    crawl_frequency: int | None = None
+    status: str | None = None
+
+
+@router.put("/{source_id}")
+def update_source(
+    source_id: str,
+    payload: SourceUpdateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("source", "update")),
+):
+    try:
+        source = db.get(Source, uuid.UUID(source_id))
+    except ValueError:
+        source = None
+    if source is None:
+        raise HTTPException(status_code=404, detail="Không tìm thấy nguồn")
+
+    # Chỉ ADMIN/OPERATOR (permission source.update) được sửa, và chỉ được set
+    # ACTIVE/INACTIVE thủ công — ERROR là trạng thái hệ thống tự set (BR-SRC-03),
+    # không cho gán qua API để tránh nhầm lẫn với cơ chế tự động phát hiện lỗi.
+    if payload.status is not None and payload.status not in _VALID_SOURCE_STATUSES:
+        raise HTTPException(status_code=400, detail=f"status phải là 1 trong {_VALID_SOURCE_STATUSES}")
+
+    old_value = {
+        "source_group": source.source_group,
+        "crawl_frequency": source.crawl_frequency,
+        "status": source.status,
+    }
+
+    if payload.source_group is not None:
+        source.source_group = payload.source_group
+    if payload.crawl_frequency is not None:
+        source.crawl_frequency = payload.crawl_frequency
+    if payload.status is not None:
+        source.status = payload.status
+
+    log_action(
+        db,
+        user_id=current_user.user_id,
+        action="UPDATE",
+        entity_type="source",
+        entity_id=source.source_id,
+        old_value=old_value,
+        new_value={
+            "source_group": source.source_group,
+            "crawl_frequency": source.crawl_frequency,
+            "status": source.status,
+        },
+        request=request,
+    )
+    db.commit()
+
+    return {
+        "source_id": str(source.source_id),
+        "name": source.name,
+        "domain": source.domain,
+        "group_name": source.group_name,
+        "source_group": source.source_group,
+        "crawl_frequency": source.crawl_frequency,
+        "status": source.status,
     }

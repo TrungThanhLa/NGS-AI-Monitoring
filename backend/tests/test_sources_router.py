@@ -76,3 +76,62 @@ def test_list_sources_returns_expected_fields(app_client, db_session):
     finally:
         db_session.delete(source)
         db_session.commit()
+
+
+def test_list_sources_includes_scheduler_fields(app_client, db_session):
+    source = Source(
+        name="Scheduled", domain=f"sched-{uuid.uuid4()}.example", group_name="G1",
+        is_active=True, source_group="Báo chí", crawl_frequency=900, status="ACTIVE",
+    )
+    db_session.add(source)
+    db_session.commit()
+
+    try:
+        response = app_client.get("/api/sources")
+        body = next(s for s in response.json()["sources"] if s["name"] == "Scheduled")
+        assert body["source_group"] == "Báo chí"
+        assert body["crawl_frequency"] == 900
+        assert body["status"] == "ACTIVE"
+    finally:
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_update_source_changes_allowed_fields(app_client, db_session):
+    source = Source(name="Editable", domain=f"edit-{uuid.uuid4()}.example", group_name="G1", is_active=True)
+    db_session.add(source)
+    db_session.commit()
+
+    try:
+        response = app_client.put(
+            f"/api/sources/{source.source_id}",
+            json={"source_group": "Bộ ngành", "crawl_frequency": 3600, "status": "INACTIVE"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["source_group"] == "Bộ ngành"
+        assert response.json()["crawl_frequency"] == 3600
+        assert response.json()["status"] == "INACTIVE"
+    finally:
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_update_source_rejects_error_status(app_client, db_session):
+    source = Source(name="NoError", domain=f"noerror-{uuid.uuid4()}.example", group_name="G1", is_active=True)
+    db_session.add(source)
+    db_session.commit()
+
+    try:
+        response = app_client.put(f"/api/sources/{source.source_id}", json={"status": "ERROR"})
+
+        assert response.status_code == 400
+    finally:
+        db_session.delete(source)
+        db_session.commit()
+
+
+def test_update_source_returns_404_for_unknown_id(app_client):
+    response = app_client.put(f"/api/sources/{uuid.uuid4()}", json={"crawl_frequency": 1000})
+
+    assert response.status_code == 404
