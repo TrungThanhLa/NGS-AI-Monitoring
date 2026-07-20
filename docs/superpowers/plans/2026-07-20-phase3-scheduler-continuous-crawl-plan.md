@@ -8,6 +8,16 @@
 
 **Tech Stack:** FastAPI + SQLAlchemy + Alembic + PostgreSQL + Celery (worker + Beat) + Redis, pytest + `TestClient`, Vite + React + AntD (FE tối thiểu).
 
+## Model Selection Policy (bắt buộc — áp dụng trước khi thực thi MỖI Task)
+
+Trước khi bắt đầu bất kỳ Task nào, người/agent thực thi **phải tự đánh giá độ khó thật của Task đó** (không dùng máy móc 1 model cho toàn bộ plan) rồi chọn model theo đúng 1 trong 3 mức sau:
+
+1. **Cơ học/đơn giản** (copy code đã viết sẵn đầy đủ trong Task, đổi tên biến/đường dẫn theo pattern có sẵn, không cần tự quyết định logic mới, rủi ro sai thấp) → dùng **Haiku**.
+2. **Cần suy luận nghiệp vụ/thiết kế** (viết logic mới, xử lý edge case, quyết định thứ tự thực thi, việc sai sẽ khó phát hiện qua test đơn giản) → dùng **Sonnet**.
+3. **Nghi ngờ cần model mạnh hơn Sonnet (Opus)** — VD Task đòi hỏi suy luận nhiều bước phức tạp bất thường so với phần còn lại của plan, hoặc rủi ro cao nếu làm sai (ảnh hưởng dữ liệu thật, đảo ngược khó) → **DỪNG LẠI, xin quyết định của user trước khi dùng Opus.** Không tự ý nâng cấp model lên Opus.
+
+Mỗi Task dưới đây có dòng **Model gợi ý** dựa trên đánh giá độ khó thực tế của Task đó tại thời điểm viết plan — đây là gợi ý ban đầu để tham khảo, **không thay thế** việc tự đánh giá lại ngay trước khi thực thi (VD nếu code base đã đổi từ lúc viết plan, độ khó thực tế có thể khác). Tuyệt đối không mặc định toàn bộ 14 Task đều chạy Sonnet.
+
 ## Global Constraints
 
 - **Không đụng `jobs`, `routers/reports.py`, `workers/report_job.py`, `report_history`, `article_analysis.job_id`, `articles.job_id`** — dữ liệu continuous crawl luôn insert với `job_id=NULL`, hoàn toàn tách biệt khỏi luồng Job on-demand đang chạy thật. Quyết định đã chốt với user (2026-07-20): không xóa/sửa `jobs` ở Phase 3 (dời qua Phase 7).
@@ -54,6 +64,8 @@
 ---
 
 ## Task 1: Migration — 4 bảng mới + cột lịch crawl trên `sources` + partial unique index `articles`
+
+**Model gợi ý:** Haiku — cơ học — copy nguyên schema đúng pattern migration 0017 đã có, không cần quyết định thiết kế mới. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
 
 **Files:**
 - Create: `backend/alembic/versions/0018_add_scheduler_tables.py`
@@ -194,6 +206,8 @@ git commit -m "feat: thêm migration schema Phase 3 (crawl_queue/system_settings
 ---
 
 ## Task 2: SQLAlchemy Models
+
+**Model gợi ý:** Haiku — cơ học — copy model đúng pattern các model hiện có (Campaign/Keyword...). (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
 
 **Files:**
 - Create: `backend/models/crawl_queue.py`
@@ -427,6 +441,8 @@ git commit -m "feat: thêm SQLAlchemy models CrawlQueue/SystemSetting/CampaignAr
 
 ## Task 3: Helper `backend/system_settings.py`
 
+**Model gợi ý:** Haiku — cơ học — 2 hàm nhỏ, logic tuyến tính, không có nhánh phức tạp. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Create: `backend/system_settings.py`
 - Test: `backend/tests/test_system_settings.py`
@@ -506,6 +522,8 @@ git commit -m "feat: thêm helper get_setting/get_bool_setting cho system_settin
 ---
 
 ## Task 4: Router `system_settings.py` — `GET`/`PUT /api/system-settings`
+
+**Model gợi ý:** Haiku — code đã viết đầy đủ trong Task, đúng pattern router hiện có (campaigns.py) — chủ yếu chép & khớp tên. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
 
 **Files:**
 - Create: `backend/routers/system_settings.py`
@@ -713,6 +731,8 @@ git commit -m "feat: thêm API GET/PUT /api/system-settings"
 
 ## Task 5: Router `sources.py` — thêm `PUT /api/sources/{id}` + mở rộng `GET`
 
+**Model gợi ý:** Haiku — tương tự Task 4 — code đã viết đầy đủ, đúng pattern router sources.py hiện có. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Modify: `backend/routers/sources.py`
 - Modify: `backend/tests/test_sources_router.py`
@@ -913,6 +933,8 @@ git commit -m "feat: thêm API PUT /api/sources/{id}, mở rộng GET /api/sourc
 
 ## Task 6: `discover_source_urls()` — Giai đoạn 1 (Discover)
 
+**Model gợi ý:** Sonnet — cần hiểu đúng ngữ nghĩa ON CONFLICT DO NOTHING + lý do tái dùng _get_candidates với date range giả — sai ở đây làm sai cả dedup. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Create: `backend/workers/continuous_crawl.py`
 - Test: `backend/tests/test_continuous_crawl.py`
@@ -1054,6 +1076,8 @@ git commit -m "feat: thêm discover_source_urls (giai đoạn 1 Discover crawl l
 ---
 
 ## Task 7: `fetch_pending_urls()` — Giai đoạn 2 (Fetch) + BR-SRC-03
+
+**Model gợi ý:** Sonnet — có nuance nghiệp vụ dễ làm sai nếu không hiểu rationale (consecutive_error_count chỉ tăng/reset khi pending_rows không rỗng — xem comment trong code). (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
 
 **Files:**
 - Modify: `backend/workers/continuous_crawl.py`
@@ -1247,6 +1271,8 @@ git commit -m "feat: thêm fetch_pending_urls (giai đoạn 2 Fetch) + tự chuy
 
 ## Task 8: `match_campaigns_for_article()` — matching từ khóa hậu-crawl
 
+**Model gợi ý:** Sonnet — logic nghiệp vụ matching + quy ước sort deterministic theo keyword_id — cần hiểu đúng lý do trước khi sửa. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Modify: `backend/workers/continuous_crawl.py`
 - Modify: `backend/tests/test_continuous_crawl.py`
@@ -1414,6 +1440,8 @@ git commit -m "feat: thêm match_campaigns_for_article — matching từ khóa h
 
 ## Task 9: `maybe_analyze_article()` — AI trigger theo công tắc `AI_AUTO_TRIGGER`
 
+**Model gợi ý:** Sonnet — wiring async trong hàm đồng bộ (asyncio.run) + phân biệt lỗi ValueError/httpx.HTTPError — dễ sai nếu không cẩn thận. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Modify: `backend/workers/continuous_crawl.py`
 - Modify: `backend/tests/test_continuous_crawl.py`
@@ -1559,6 +1587,8 @@ git commit -m "feat: thêm maybe_analyze_article — AI trigger theo công tắc
 
 ## Task 10: Celery task `crawl_task` — wiring toàn bộ pipeline
 
+**Model gợi ý:** Sonnet — rủi ro import vòng lặp giữa continuous_crawl.py và celery_app.py — cần hiểu đúng thứ tự import mới không lỗi. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Modify: `backend/workers/continuous_crawl.py`
 - Modify: `backend/workers/celery_app.py`
@@ -1622,6 +1652,8 @@ git commit -m "feat: thêm Celery task crawl_task nối Discover→Fetch→Match
 ---
 
 ## Task 11: `list_due_sources()` + Celery Beat `check_due_sources`
+
+**Model gợi ý:** Sonnet — logic so sánh thời gian (timezone-aware) + sửa docker-compose.yml — sai timezone dễ làm Beat không bao giờ enqueue hoặc enqueue liên tục. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
 
 **Files:**
 - Create: `backend/workers/scheduler.py`
@@ -1840,6 +1872,8 @@ git commit -m "feat: thêm Celery Beat check_due_sources quét mỗi 60s theo So
 
 ## Task 12: FE — Modal sửa Nguồn (`crawl_frequency`/`status`/`source_group`)
 
+**Model gợi ý:** Haiku — code FE đã viết đầy đủ trong Task, chỉ cần chép đúng & nối vào file hiện có. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Create: `frontend/src/pages/Sources/SourceEditModal.tsx`
 - Modify: `frontend/src/pages/Sources/index.tsx`
@@ -2012,6 +2046,8 @@ git commit -m "feat: thêm modal sửa nguồn (source_group/crawl_frequency/sta
 
 ## Task 13: FE — Card "Giám sát liên tục" trên `/system/settings`
 
+**Model gợi ý:** Haiku — tương tự Task 12 — code đã viết đầy đủ, chép & nối. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
+
 **Files:**
 - Modify: `frontend/src/pages/System/Settings/index.tsx`
 
@@ -2109,6 +2145,8 @@ git commit -m "feat: thêm Card Giám sát liên tục (SCHEDULER_ENABLED/AI_AUT
 ---
 
 ## Task 14: Verify toàn diện (bước Commit của EPCC)
+
+**Model gợi ý:** Sonnet — cần phán đoán khi đọc log/kết quả verify thực tế (Docker, psql), không chỉ làm theo kịch bản cố định. (Tự đánh giá lại trước khi thực thi — xem "Model Selection Policy" ở đầu file.)
 
 **Files:** không tạo file mới — chỉ chạy verify.
 
