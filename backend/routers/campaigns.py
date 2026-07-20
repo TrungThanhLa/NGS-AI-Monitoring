@@ -275,3 +275,73 @@ def delete_campaign(
     db.commit()
 
     return _serialize_campaign(db, campaign)
+
+
+@router.post("/{campaign_id}/activate")
+def activate_campaign(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("campaign", "update")),
+):
+    campaign = _get_campaign_or_404(db, campaign_id)
+
+    if campaign.status not in ("DRAFT", "PAUSED"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể kích hoạt chiến dịch đang ở trạng thái {campaign.status}",
+        )
+
+    # BR-CAMP-03: chỉ chuyển ACTIVE khi có >=1 nguồn VÀ >=1 từ khóa
+    has_source = db.query(CampaignSource).filter_by(campaign_id=campaign.campaign_id).first() is not None
+    has_keyword = db.query(CampaignKeyword).filter_by(campaign_id=campaign.campaign_id).first() is not None
+    if not (has_source and has_keyword):
+        raise HTTPException(
+            status_code=400,
+            detail="Chiến dịch cần ít nhất 1 nguồn dữ liệu và 1 từ khóa để kích hoạt (BR-CAMP-03)",
+        )
+
+    old_status = campaign.status
+    campaign.status = "ACTIVE"
+
+    log_action(
+        db,
+        user_id=current_user.user_id,
+        action="UPDATE",
+        entity_type="campaign",
+        entity_id=campaign.campaign_id,
+        old_value={"status": old_status},
+        new_value={"status": "ACTIVE"},
+    )
+    db.commit()
+
+    return _serialize_campaign(db, campaign)
+
+
+@router.post("/{campaign_id}/pause")
+def pause_campaign(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("campaign", "update")),
+):
+    campaign = _get_campaign_or_404(db, campaign_id)
+
+    if campaign.status != "ACTIVE":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chỉ tạm dừng được chiến dịch đang ACTIVE (hiện tại: {campaign.status})",
+        )
+
+    campaign.status = "PAUSED"
+
+    log_action(
+        db,
+        user_id=current_user.user_id,
+        action="UPDATE",
+        entity_type="campaign",
+        entity_id=campaign.campaign_id,
+        old_value={"status": "ACTIVE"},
+        new_value={"status": "PAUSED"},
+    )
+    db.commit()
+
+    return _serialize_campaign(db, campaign)

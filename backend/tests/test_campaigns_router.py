@@ -224,3 +224,64 @@ def test_delete_campaign_already_archived_returns_400(app_client, admin_user, db
     response = app_client.delete(f"/api/campaigns/{campaign.campaign_id}")
 
     assert response.status_code == 400
+
+
+def test_activate_campaign_requires_source_and_keyword(app_client, admin_user):
+    create_response = app_client.post(
+        "/api/campaigns", json={"name": "Thiếu source/keyword", "start_date": "2026-08-01", "owner_id": str(admin_user.user_id)}
+    )
+    campaign_id = create_response.json()["campaign_id"]
+
+    response = app_client.post(f"/api/campaigns/{campaign_id}/activate")
+
+    assert response.status_code == 400  # BR-CAMP-03
+
+
+def test_activate_campaign_succeeds_with_source_and_keyword(app_client, admin_user, source, keyword):
+    create_response = app_client.post(
+        "/api/campaigns",
+        json={
+            "name": "Đủ điều kiện",
+            "start_date": "2026-08-01",
+            "owner_id": str(admin_user.user_id),
+            "source_ids": [str(source.source_id)],
+            "keyword_ids": [str(keyword.keyword_id)],
+        },
+    )
+    campaign_id = create_response.json()["campaign_id"]
+
+    response = app_client.post(f"/api/campaigns/{campaign_id}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ACTIVE"
+
+
+def test_activate_campaign_rejects_when_archived(app_client, admin_user, db_session):
+    campaign = Campaign(name="Archived", owner_id=admin_user.user_id, status="ARCHIVED", start_date=date(2026, 8, 1))
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 400
+
+
+def test_pause_campaign_requires_active_status(app_client, admin_user, db_session):
+    campaign = Campaign(name="Draft chưa activate", owner_id=admin_user.user_id, status="DRAFT", start_date=date(2026, 8, 1))
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/pause")
+
+    assert response.status_code == 400
+
+
+def test_pause_campaign_succeeds_from_active(app_client, admin_user, db_session):
+    campaign = Campaign(name="Đang active", owner_id=admin_user.user_id, status="ACTIVE", start_date=date(2026, 8, 1))
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/pause")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "PAUSED"
