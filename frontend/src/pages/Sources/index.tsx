@@ -4,12 +4,16 @@ import { SearchOutlined, EditOutlined, ApiOutlined } from "@ant-design/icons";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import { authFetch } from "@/lib/api";
+import SourceEditModal from "./SourceEditModal";
 
 type Source = {
   source_id: string;
   name: string;
   domain: string;
   group_name: string;
+  source_group: string | null;
+  crawl_frequency: number | null;
+  status: string | null;
 };
 
 export default function SourcesPage() {
@@ -18,8 +22,10 @@ export default function SourcesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [keyword, setKeyword] = useState("");
+  const [editingSource, setEditingSource] = useState<Source | null>(null);
 
-  useEffect(() => {
+  const reload = () => {
+    setLoading(true);
     authFetch("/api/sources")
       .then((res) => (res.ok ? res.json() : { sources: [] }))
       .then((data) => {
@@ -28,6 +34,10 @@ export default function SourcesPage() {
       })
       .catch(() => setError("Không tải được danh sách nguồn dữ liệu"))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    reload();
   }, []);
 
   const filtered = sources.filter((s) => s.name.toLowerCase().includes(keyword.toLowerCase()));
@@ -39,7 +49,20 @@ export default function SourcesPage() {
     {
       title: "Trạng thái",
       key: "status",
-      render: () => <Tag color="success">Đang hoạt động</Tag>,
+      render: (_: unknown, r: Source) => {
+        const status = r.status ?? "ACTIVE";
+        const colorMap: Record<string, string> = {
+          ACTIVE: "success",
+          INACTIVE: "default",
+          ERROR: "error",
+        };
+        const labelMap: Record<string, string> = {
+          ACTIVE: "Đang hoạt động",
+          INACTIVE: "Tạm dừng",
+          ERROR: "Lỗi",
+        };
+        return <Tag color={colorMap[status]}>{labelMap[status]}</Tag>;
+      },
     },
     {
       title: "Thao tác",
@@ -50,8 +73,8 @@ export default function SourcesPage() {
           <Tooltip title="Chưa triển khai — CRUD nguồn qua UI thuộc phạm vi Slice 6, chưa code">
             <Button type="text" icon={<ApiOutlined />} disabled />
           </Tooltip>
-          <Tooltip title="Chưa triển khai">
-            <Button type="text" icon={<EditOutlined />} disabled />
+          <Tooltip title="Sửa nhóm nguồn / chu kỳ crawl / trạng thái">
+            <Button type="text" icon={<EditOutlined />} onClick={() => setEditingSource(r)} />
           </Tooltip>
         </Space>
       ),
@@ -92,6 +115,13 @@ export default function SourcesPage() {
           pagination={{ pageSize: 20, showTotal: (t) => `Tổng ${t} nguồn` }}
         />
       </Card>
+
+      <SourceEditModal
+        source={editingSource}
+        open={editingSource !== null}
+        onClose={() => setEditingSource(null)}
+        onSaved={reload}
+      />
     </div>
   );
 }
