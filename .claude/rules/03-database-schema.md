@@ -76,8 +76,9 @@ CREATE TABLE audit_logs (
     created_at   TIMESTAMP DEFAULT NOW()
 );
 
--- Đưa các hằng số hiện đang hardcode trong .env lên cấu hình được qua UI, VD công tắc
--- AI_AUTO_TRIGGER (xem 17-continuous-crawler-scheduler.md) — chỉ ADMIN được sửa
+-- [ĐÃ CODE — Phase 3, migration 0018] Đưa các hằng số hiện đang hardcode trong .env lên cấu
+-- hình được qua UI — 2 công tắc đã seed: SCHEDULER_ENABLED, AI_AUTO_TRIGGER (xem
+-- 17-continuous-crawler-scheduler.md) — chỉ ADMIN được sửa
 CREATE TABLE system_settings (
     setting_key   VARCHAR(255) PRIMARY KEY,
     setting_value TEXT,
@@ -106,13 +107,18 @@ CREATE TABLE sources (
     is_active     BOOLEAN DEFAULT true,
     created_at    TIMESTAMP DEFAULT NOW(),
 
-    -- [CHƯA CODE] — cột bổ sung cho crawl liên tục theo lịch (xem 17-continuous-crawler-scheduler.md)
-    source_group        VARCHAR(255),           -- nhóm nguồn dùng chung (Chính phủ/Bộ ngành/Báo chí...)
-    crawl_frequency      INTEGER DEFAULT 1800,   -- giây, mặc định 30 phút cho báo điện tử
-    last_crawled_at       TIMESTAMP,
-    status                VARCHAR(30) DEFAULT 'ACTIVE'  -- [CHƯA CODE] ACTIVE|INACTIVE|ERROR, thay thế
-                                                          -- is_active cho mục đích crawl tự động
-                                                          -- (BR-SRC-03)
+    -- [ĐÃ CODE] — cột bổ sung cho crawl liên tục theo lịch (xem 17-continuous-crawler-scheduler.md)
+    source_group        VARCHAR(255),           -- nhóm nguồn dùng chung (Chính phủ/Bộ ngành/Báo chí...) — Phase 2 (migration 0017)
+    crawl_frequency      INTEGER DEFAULT 1800,   -- giây, mặc định 30 phút cho báo điện tử — Phase 3 (migration 0018)
+    last_crawled_at       TIMESTAMP,             -- Phase 3
+    status                VARCHAR(30) DEFAULT 'ACTIVE',  -- ACTIVE|INACTIVE|ERROR, thay thế is_active
+                                                           -- cho mục đích crawl tự động (BR-SRC-03) — Phase 3
+    consecutive_error_count INTEGER DEFAULT 0    -- đếm số chu kỳ Fetch liên tiếp không fetch được bài
+                                                   -- nào (chỉ tính khi crawl_queue có URL để thử — nguồn
+                                                   -- đăng bài thưa không bị tính lỗi oan); >10 → tự chuyển
+                                                   -- status=ERROR (BR-SRC-03). Cột này KHÔNG có trong thiết
+                                                   -- kế BR-SRC-03 gốc, bổ sung khi code Phase 3 vì cần 1 nơi
+                                                   -- lưu trạng thái đếm — Phase 3 (migration 0018)
 );
 ```
 
@@ -169,13 +175,30 @@ CREATE TABLE campaign_sources (
 -- Kết quả so khớp từ khóa GIỮA 1 Campaign và 1 Article, tính RIÊNG cho từng Campaign ngay
 -- sau khi crawl xong (không lọc ngay lúc crawl — articles vẫn lưu chung theo source_id cho
 -- mọi Campaign dùng chung Nguồn đó, xem 17-continuous-crawler-scheduler.md). Content list/
--- Report/Alert của 1 Campaign chỉ tính trên các dòng ở đây.
+-- Report/Alert của 1 Campaign chỉ tính trên các dòng ở đây. [ĐÃ CODE — Phase 3, migration 0018]
 CREATE TABLE campaign_articles (
     campaign_id         UUID REFERENCES campaigns(campaign_id) ON DELETE RESTRICT,
     article_id          UUID REFERENCES articles(article_id) ON DELETE RESTRICT,
-    matched_keyword_id  UUID REFERENCES keywords(keyword_id),
+    matched_keyword_id  UUID REFERENCES keywords(keyword_id),  -- keyword_id NHỎ NHẤT trong số từ khóa
+                                                                 -- trúng (campaign_keywords không có cột
+                                                                 -- thứ tự khai báo — sort theo keyword_id
+                                                                 -- để có tiêu chí xác định/deterministic),
+                                                                 -- chỉ dùng hiển thị rút gọn ở bảng danh
+                                                                 -- sách — muốn xem ĐẦY ĐỦ mọi từ khóa trúng
+                                                                 -- thì dùng bảng campaign_article_keywords
     matched_at          TIMESTAMP DEFAULT NOW(),
     PRIMARY KEY (campaign_id, article_id)
+);
+
+-- Bảng phụ [ĐÃ CODE — Phase 3, migration 0018, KHÔNG có trong thiết kế rule gốc] — lưu ĐẦY ĐỦ
+-- mọi từ khóa trúng cho 1 cặp (Campaign, Article), không chỉ 1 (khác với matched_keyword_id ở
+-- trên chỉ lưu 1 giá trị tham khảo). Dùng cho Content Detail (Phase 4) hiện đủ tag từ khóa.
+CREATE TABLE campaign_article_keywords (
+    campaign_id UUID NOT NULL,
+    article_id  UUID NOT NULL,
+    keyword_id  UUID NOT NULL REFERENCES keywords(keyword_id),
+    PRIMARY KEY (campaign_id, article_id, keyword_id),
+    FOREIGN KEY (campaign_id, article_id) REFERENCES campaign_articles(campaign_id, article_id)
 );
 ```
 
@@ -234,9 +257,9 @@ CREATE TABLE articles (
 );
 ```
 
-**Ràng buộc UNIQUE trên `(?, url_hash)` — đổi khi migrate sang crawl liên tục:**
-- `[ĐÃ CODE]` hiện tại: composite `UNIQUE (job_id, url_hash)` — dedup **trong phạm vi 1 job**, không dedup xuyên job (quyết định 2026-07-09).
-- `[CHƯA CODE]` sau migrate: đảo ngược quyết định trên — `DROP COLUMN job_id`, đổi thành `UNIQUE (source_id, url_hash)` — dedup **toàn cục theo Source**, bắt buộc vì crawl liên tục sẽ liệt kê lại URL cũ mỗi chu kỳ. Xem lý do đầy đủ và đánh đổi chấp nhận ở [06 · Crawler Strategy](06-crawler-strategy.md).
+**Ràng buộc UNIQUE trên `(?, url_hash)` — 2 constraint song song, KHÔNG phải 1 đổi thành 1 như thiết kế ban đầu:**
+- `[ĐÃ CODE]`: composite `UNIQUE (job_id, url_hash)` (migration 0009) — dedup **trong phạm vi 1 job**, không dedup xuyên job (quyết định 2026-07-09). Dòng nào có `job_id` (do luồng Job on-demand insert) vẫn theo constraint này, không đổi gì.
+- `[ĐÃ CODE — Phase 3, migration 0018]`: PARTIAL unique index `articles_source_id_url_hash_continuous_key` trên `(source_id, url_hash) WHERE job_id IS NULL` — dedup **toàn cục theo Source**, chỉ áp dụng cho dòng do continuous crawl insert (`job_id=NULL`). **Đây là sửa đổi so với thiết kế ban đầu** (rule này trước đó ghi "sau migrate: DROP COLUMN job_id, đổi thẳng thành UNIQUE(source_id, url_hash) toàn bảng") — user từ chối đổi thẳng vì sẽ buộc phải xóa hẳn `jobs` ngay (mọi FK phụ thuộc), tắt tính năng "Tạo báo cáo" on-demand cho tới khi Phase 7 xây lại. Partial index là bước đệm tương thích xuôi: khi Phase 7 xóa hẳn `jobs`, chỉ cần drop cột `job_id` + constraint cũ + đổi partial index thành index thường.
 
 ---
 
@@ -263,7 +286,7 @@ CREATE TABLE article_analysis (
 
 ---
 
-## Nhóm: Crawl liên tục — `crawl_queue` `[CHƯA CODE]`
+## Nhóm: Crawl liên tục — `crawl_queue` `[ĐÃ CODE — Phase 3, migration 0018]`
 
 > Hàng đợi bền, tách "khám phá URL" (rẻ, nhanh) khỏi "tải nội dung" (tốn thời gian, dễ đứt giữa chừng) — chống mất dữ liệu khi crawl bị gián đoạn. Chi tiết cơ chế: xem [17 · Continuous Crawler & Scheduler](17-continuous-crawler-scheduler.md).
 

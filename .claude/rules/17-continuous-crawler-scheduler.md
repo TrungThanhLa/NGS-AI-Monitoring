@@ -5,7 +5,7 @@ alwaysApply: false
 
 # 17 · Continuous Crawler & Scheduler
 
-> **Trạng thái: `[CHƯA CODE]`.** Cơ chế Celery Beat theo Nguồn, `crawl_queue` 2 giai đoạn, dedup toàn cục theo Source: xem [06 · Crawler Strategy](06-crawler-strategy.md). Schema (`crawl_queue`, `articles.review_status`): xem [03 · Database Schema](03-database-schema.md). API (`/api/contents/*`): xem [05 · API Contracts](05-api-contracts.md).
+> **Trạng thái: `[ĐÃ CODE]` Celery Beat/`crawl_queue`/matching từ khóa/`AI_AUTO_TRIGGER` (Phase 3) — `[CHƯA CODE]` Content review (`articles.review_status`, `/api/contents/*`, Phase 4).** Cơ chế Celery Beat theo Nguồn, `crawl_queue` 2 giai đoạn, dedup toàn cục theo Source: xem [06 · Crawler Strategy](06-crawler-strategy.md). Schema (`crawl_queue`, `articles.review_status`): xem [03 · Database Schema](03-database-schema.md). API (`/api/contents/*`): xem [05 · API Contracts](05-api-contracts.md).
 
 ## Matching từ khóa (hậu-crawl, không lọc tại bước crawl)
 
