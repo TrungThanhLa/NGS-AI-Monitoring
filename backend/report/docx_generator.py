@@ -3,10 +3,10 @@ import json
 from docx import Document
 
 
-def generate_docx(job, aggregates: dict, output_path: str) -> None:
+def generate_docx(date_from, date_to, aggregates: dict, output_path: str) -> None:
     doc = Document()
     doc.add_heading("Báo cáo NGS Monitor", level=1)
-    doc.add_paragraph(f"Khoảng thời gian: {job.date_from} – {job.date_to}")
+    doc.add_paragraph(f"Khoảng thời gian: {date_from} – {date_to}")
 
     doc.add_heading("Bảng 3.1. Số lượng nội dung theo cơ quan", level=2)
     _add_count_table(doc, "Cơ quan", aggregates["source_counts"])
@@ -56,11 +56,11 @@ def _add_count_table(doc: Document, label_column: str, counts: dict) -> None:
         cells[1].text = str(count)
 
 
-def export_json(job, aggregates: dict, output_path: str) -> None:
+def export_json(report_id: str, date_from, date_to, aggregates: dict, output_path: str) -> None:
     data = {
-        "job_id": str(job.job_id),
-        "date_from": str(job.date_from),
-        "date_to": str(job.date_to),
+        "report_id": report_id,
+        "date_from": str(date_from),
+        "date_to": str(date_to),
         **aggregates,
     }
     with open(output_path, "w", encoding="utf-8") as f:

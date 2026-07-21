@@ -259,8 +259,8 @@ def _generate_report(db, job: Job) -> None:
     output_docx = os.path.join(storage_path, f"{job.job_id}.docx")
     output_json = os.path.join(storage_path, f"{job.job_id}.json")
 
-    generate_docx(job, aggregates, output_docx)
-    export_json(job, aggregates, output_json)
+    generate_docx(job.date_from, job.date_to, aggregates, output_docx)
+    export_json(str(job.job_id), job.date_from, job.date_to, aggregates, output_json)
 
     job.output_docx = output_docx
     job.output_json = output_json
