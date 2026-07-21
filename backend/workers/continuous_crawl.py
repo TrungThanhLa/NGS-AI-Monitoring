@@ -1,9 +1,13 @@
-from datetime import date, timedelta
+import os
+import time
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 
 from backend.crawler.article import compute_url_hash
-from backend.models import CrawlQueue, Source
+from backend.crawler.crawl4ai_client import fetch_article_dispatch
+from backend.models import Article, CrawlQueue, Source
 
 # Discover không giới hạn CỨNG theo date_from/date_to như Job on-demand — nhưng KHÔNG
 # quét từ "vô hạn trong quá khứ" (đã thử date(2000,1,1) và phát hiện bug thật: với
@@ -56,3 +60,90 @@ def discover_source_urls(db, source: Source, today: date | None = None) -> int:
     result = db.execute(stmt)
     db.commit()
     return result.rowcount
+
+
+_CONSECUTIVE_ERROR_LIMIT = 10  # BR-SRC-03 — ngưỡng khởi điểm, chưa dựa trên dữ liệu vận hành thật
+
+
+def fetch_pending_urls(db, source: Source) -> list[Article]:
+    """Giai đoạn 2 (Fetch): tải nội dung mọi URL đang 'pending' của nguồn (gồm cả URL
+    lỡ chu kỳ trước — đây là cơ chế tự phục hồi khi worker bị đứt giữa chừng). Trả về
+    danh sách Article vừa fetch THÀNH CÔNG trong lượt này."""
+    delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
+    max_retries = int(os.environ.get("CRAWLER_MAX_RETRIES", "3"))
+
+    pending_rows = db.query(CrawlQueue).filter_by(source_id=source.source_id, status="pending").all()
+
+    fetched_articles: list[Article] = []
+    handled_count = 0  # bài fetch THÀNH CÔNG trong lượt này — gồm cả bài bị IntegrityError
+    # (tiến trình khác đã lưu trước, xem nhánh dưới) — khác fetched_articles (chỉ bài MỚI,
+    # dùng cho matching/AI ở crawl_task). Dùng cho quyết định BR-SRC-03 ở cuối hàm: 1 chu kỳ
+    # toàn bài bị IntegrityError (do race, không phải do site lỗi) vẫn là chu kỳ THÀNH CÔNG
+    # về mặt fetch — không được tính vào consecutive_error_count, nếu không nguồn khỏe mạnh
+    # nhưng bị race trùng lặp nhiều lần sẽ bị oan chuyển ERROR.
+    for row in pending_rows:
+        try:
+            parsed = fetch_article_dispatch(row.url, source.parsing_rules)
+        except Exception:
+            parsed = None
+        time.sleep(delay_seconds)
+
+        if parsed is None:
+            row.retry_count += 1
+            if row.retry_count > max_retries:
+                row.status = "error"
+            db.commit()
+            continue
+
+        article = Article(
+            job_id=None,
+            source_id=source.source_id,
+            url=parsed["url"],
+            url_hash=parsed["url_hash"],
+            title=parsed["title"],
+            content_raw=parsed["content_raw"],
+            author=parsed["author"],
+            published_at=parsed.get("published_at"),
+            crawl_duration_seconds=parsed.get("crawl_duration_seconds"),
+        )
+        db.add(article)
+        try:
+            db.commit()
+        except IntegrityError:
+            # Có thể xảy ra khi 1 chu kỳ Fetch chưa xử lý hết hàng đợi trước khi
+            # crawl_frequency trôi qua lần nữa (VD nguồn có backlog lớn hơn dự kiến
+            # lúc mới bật continuous crawl) — Beat enqueue thêm crawl_task cho CÙNG
+            # source_id trong khi task cũ vẫn đang chạy, 2 tiến trình cùng fetch
+            # trùng 1 URL và cùng insert — partial unique index (source_id, url_hash)
+            # chặn đúng, nhưng phải rollback + bỏ qua thay vì để crash cả crawl_task
+            # (mất luôn tiến độ các URL còn lại trong batch). Không phải lỗi dữ liệu —
+            # bài đã được tiến trình kia lưu thành công, coi như hàng này xong việc.
+            db.rollback()
+            row.status = "fetched"
+            row.fetched_at = datetime.now(timezone.utc)
+            db.commit()
+            handled_count += 1
+            continue
+        row.status = "fetched"
+        row.fetched_at = datetime.now(timezone.utc)
+        db.commit()
+        fetched_articles.append(article)
+        handled_count += 1
+
+    source.last_crawled_at = datetime.now(timezone.utc)
+    # Chỉ tính là "chu kỳ lỗi" khi THỰC SỰ có URL để thử mà không fetch được bài nào —
+    # nguồn không có bài mới trong 1 chu kỳ (pending_rows rỗng, VD nguồn đăng bài thưa)
+    # KHÔNG được tính là lỗi, nếu không nguồn khỏe mạnh nhưng ít đăng bài sẽ bị tự
+    # chuyển ERROR oan sau vài chu kỳ yên ắng. Dùng handled_count (không phải
+    # fetched_articles) — 1 chu kỳ toàn bài bị IntegrityError (race, không phải site
+    # lỗi thật) vẫn phải reset về 0, không được tính là lỗi.
+    if pending_rows:
+        if handled_count:
+            source.consecutive_error_count = 0
+        else:
+            source.consecutive_error_count += 1
+            if source.consecutive_error_count > _CONSECUTIVE_ERROR_LIMIT:
+                source.status = "ERROR"
+    db.commit()
+
+    return fetched_articles
