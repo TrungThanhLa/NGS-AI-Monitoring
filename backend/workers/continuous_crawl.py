@@ -246,3 +246,28 @@ def maybe_analyze_article(db, article: Article) -> None:
     )
     article.status = "analyzed"
     db.commit()
+
+
+import uuid
+
+from backend.db import SessionLocal
+from backend.workers.celery_app import celery_app
+
+
+@celery_app.task(name="continuous_crawl.crawl_task")
+def crawl_task(source_id: str) -> None:
+    """Celery task nối toàn bộ pipeline crawl liên tục cho 1 Nguồn: Discover → Fetch →
+    (per-article) Matching từ khóa Campaign → AI trigger (nếu AI_AUTO_TRIGGER=true).
+    Mở/đóng SessionLocal() riêng cho task này (không dùng chung session với request FE)."""
+    db = SessionLocal()
+    try:
+        source = db.get(Source, uuid.UUID(source_id))
+        if source is None:
+            return
+        discover_source_urls(db, source)
+        fetched_articles = fetch_pending_urls(db, source)
+        for article in fetched_articles:
+            match_campaigns_for_article(db, article)
+            maybe_analyze_article(db, article)
+    finally:
+        db.close()
