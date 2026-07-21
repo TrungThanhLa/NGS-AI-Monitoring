@@ -1,9 +1,41 @@
+import { useEffect, useState } from 'react'
 import { App, Button, Card, Col, Form, InputNumber, Row, Switch } from 'antd'
 import PageHeader from '@/components/common/PageHeader'
+import { authFetch } from '@/lib/api'
 
 export default function SystemSettings() {
   const [form] = Form.useForm()
   const { message } = App.useApp()
+
+  const [schedulerEnabled, setSchedulerEnabled] = useState(false)
+  const [aiAutoTrigger, setAiAutoTrigger] = useState(false)
+  const [loadingSettings, setLoadingSettings] = useState(true)
+
+  useEffect(() => {
+    authFetch('/api/system-settings')
+      .then((res) => (res.ok ? res.json() : { settings: [] }))
+      .then((body) => {
+        const settings: { setting_key: string; setting_value: string }[] = body.settings ?? []
+        setSchedulerEnabled(settings.find((s) => s.setting_key === 'SCHEDULER_ENABLED')?.setting_value === 'true')
+        setAiAutoTrigger(settings.find((s) => s.setting_key === 'AI_AUTO_TRIGGER')?.setting_value === 'true')
+      })
+      .catch(() => message.error('Không tải được cấu hình hệ thống'))
+      .finally(() => setLoadingSettings(false))
+  }, [])
+
+  const updateSetting = async (key: string, value: boolean, onLocalRevert: () => void) => {
+    const res = await authFetch(`/api/system-settings/${key}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ setting_value: String(value) }),
+    })
+    if (!res.ok) {
+      message.error('Không thể cập nhật cấu hình')
+      onLocalRevert()
+      return
+    }
+    message.success('Cập nhật cấu hình thành công')
+  }
 
   const onSave = () => {
     message.success('Lưu cài đặt thành công')
@@ -53,6 +85,33 @@ export default function SystemSettings() {
               </Form.Item>
               <Form.Item>
                 <Button type="primary" htmlType="submit">Lưu cài đặt</Button>
+              </Form.Item>
+            </Form>
+          </Card>
+        </Col>
+
+        <Col xs={24} lg={12}>
+          <Card title="Giám sát liên tục" style={{ borderRadius: 12 }}>
+            <Form layout="vertical">
+              <Form.Item label="Bật Celery Beat tự động crawl liên tục theo Campaign đang hoạt động">
+                <Switch
+                  checked={schedulerEnabled}
+                  loading={loadingSettings}
+                  onChange={(checked) => {
+                    setSchedulerEnabled(checked)
+                    updateSetting('SCHEDULER_ENABLED', checked, () => setSchedulerEnabled(!checked))
+                  }}
+                />
+              </Form.Item>
+              <Form.Item label="Tự động chạy AI phân tích ngay sau khi crawl xong 1 bài">
+                <Switch
+                  checked={aiAutoTrigger}
+                  loading={loadingSettings}
+                  onChange={(checked) => {
+                    setAiAutoTrigger(checked)
+                    updateSetting('AI_AUTO_TRIGGER', checked, () => setAiAutoTrigger(!checked))
+                  }}
+                />
               </Form.Item>
             </Form>
           </Card>
