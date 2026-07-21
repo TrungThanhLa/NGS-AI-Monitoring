@@ -210,3 +210,82 @@ def test_fetch_pending_urls_all_duplicate_cycle_does_not_count_as_error(db_sessi
     db_session.refresh(source)
     assert source.consecutive_error_count == 0  # KHÔNG được tăng — chu kỳ này fetch thành công thật
 
+
+from backend.models import (
+    Campaign,
+    CampaignArticle,
+    CampaignArticleKeyword,
+    CampaignKeyword,
+    CampaignSource,
+    Keyword,
+)
+from backend.workers.continuous_crawl import match_campaigns_for_article
+
+
+def test_match_campaigns_for_article_creates_bridge_rows_for_all_matched_keywords(db_session):
+    source = _make_source(db_session, "Match1")
+    campaign = Campaign(name="Chống lừa đảo", start_date="2026-08-01", status="ACTIVE")
+    kw_match_1 = Keyword(keyword="lừa đảo")
+    kw_match_2 = Keyword(keyword="Zalo")
+    kw_no_match = Keyword(keyword="Facebook")
+    db_session.add_all([campaign, kw_match_1, kw_match_2, kw_no_match])
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw_match_1.keyword_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw_match_2.keyword_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw_no_match.keyword_id))
+    article = Article(source_id=source.source_id, url="https://m1.example/a", url_hash="hm1",
+                       title="Cảnh báo lừa đảo qua Zalo", content_raw="Nội dung chi tiết")
+    db_session.add(article)
+    db_session.commit()
+
+    match_campaigns_for_article(db_session, article)
+
+    ca = db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id, article_id=article.article_id).one()
+    expected_first = min([kw_match_1.keyword_id, kw_match_2.keyword_id])
+    assert ca.matched_keyword_id == expected_first
+
+    matched_keyword_ids = {
+        row.keyword_id
+        for row in db_session.query(CampaignArticleKeyword).filter_by(
+            campaign_id=campaign.campaign_id, article_id=article.article_id
+        ).all()
+    }
+    assert matched_keyword_ids == {kw_match_1.keyword_id, kw_match_2.keyword_id}
+
+
+def test_match_campaigns_for_article_skips_when_no_keyword_matches(db_session):
+    source = _make_source(db_session, "Match2")
+    campaign = Campaign(name="Không liên quan", start_date="2026-08-01", status="ACTIVE")
+    kw = Keyword(keyword="an ninh mạng")
+    db_session.add_all([campaign, kw])
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw.keyword_id))
+    article = Article(source_id=source.source_id, url="https://m2.example/a", url_hash="hm2",
+                       title="Tin tức thể thao", content_raw="Không liên quan gì")
+    db_session.add(article)
+    db_session.commit()
+
+    match_campaigns_for_article(db_session, article)
+
+    assert db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id).count() == 0
+
+
+def test_match_campaigns_for_article_ignores_non_active_campaign(db_session):
+    source = _make_source(db_session, "Match3")
+    campaign = Campaign(name="Còn nháp", start_date="2026-08-01", status="DRAFT")
+    kw = Keyword(keyword="lừa đảo")
+    db_session.add_all([campaign, kw])
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw.keyword_id))
+    article = Article(source_id=source.source_id, url="https://m3.example/a", url_hash="hm3",
+                       title="Cảnh báo lừa đảo", content_raw="Nội dung")
+    db_session.add(article)
+    db_session.commit()
+
+    match_campaigns_for_article(db_session, article)
+
+    assert db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id).count() == 0
+

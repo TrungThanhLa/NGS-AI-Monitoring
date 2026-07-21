@@ -7,7 +7,17 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.crawler.article import compute_url_hash
 from backend.crawler.crawl4ai_client import fetch_article_dispatch
-from backend.models import Article, CrawlQueue, Source
+from backend.models import (
+    Article,
+    Campaign,
+    CampaignArticle,
+    CampaignArticleKeyword,
+    CampaignKeyword,
+    CampaignSource,
+    CrawlQueue,
+    Keyword,
+    Source,
+)
 
 # Discover không giới hạn CỨNG theo date_from/date_to như Job on-demand — nhưng KHÔNG
 # quét từ "vô hạn trong quá khứ" (đã thử date(2000,1,1) và phát hiện bug thật: với
@@ -147,3 +157,48 @@ def fetch_pending_urls(db, source: Source) -> list[Article]:
     db.commit()
 
     return fetched_articles
+
+
+def match_campaigns_for_article(db, article: Article) -> None:
+    """Hậu-crawl (rule 17): với mỗi Campaign ACTIVE đang theo dõi source_id của bài này,
+    so khớp TOÀN BỘ từ khóa của Campaign đó (không dừng sớm khi trúng 1 từ) — mọi từ
+    khóa trúng đều được ghi vào campaign_article_keywords để FE hiện đủ (Phase 4).
+    campaign_articles.matched_keyword_id chỉ lưu keyword_id NHỎ NHẤT trong số trúng —
+    dùng làm giá trị tham khảo/hiển thị rút gọn, vì campaign_keywords không có cột thứ
+    tự khai báo nên không có khái niệm "từ khóa đầu tiên" thật sự, phải chọn 1 tiêu chí
+    sắp xếp xác định (deterministic)."""
+    haystack = f"{article.title or ''} {article.content_raw or ''}".lower()
+
+    campaign_ids = (
+        db.query(CampaignSource.campaign_id)
+        .join(Campaign, Campaign.campaign_id == CampaignSource.campaign_id)
+        .filter(CampaignSource.source_id == article.source_id, Campaign.status == "ACTIVE")
+        .all()
+    )
+
+    for (campaign_id,) in campaign_ids:
+        keywords = (
+            db.query(Keyword)
+            .join(CampaignKeyword, CampaignKeyword.keyword_id == Keyword.keyword_id)
+            .filter(CampaignKeyword.campaign_id == campaign_id)
+            .order_by(Keyword.keyword_id)
+            .all()
+        )
+        matched = [k for k in keywords if k.keyword.lower() in haystack]
+        if not matched:
+            continue
+
+        db.add(
+            CampaignArticle(
+                campaign_id=campaign_id, article_id=article.article_id, matched_keyword_id=matched[0].keyword_id
+            )
+        )
+        # Flush riêng CampaignArticle trước — FK composite của campaign_article_keywords
+        # trỏ tới (campaign_id, article_id) của campaign_articles, SQLAlchemy không tự
+        # suy ra được thứ tự insert giữa 2 bảng từ ForeignKeyConstraint composite này
+        # (không có relationship() khai báo), nên phải flush tay để tránh
+        # ForeignKeyViolation khi insert campaign_article_keywords ngay sau đó.
+        db.flush()
+        for k in matched:
+            db.add(CampaignArticleKeyword(campaign_id=campaign_id, article_id=article.article_id, keyword_id=k.keyword_id))
+        db.commit()
