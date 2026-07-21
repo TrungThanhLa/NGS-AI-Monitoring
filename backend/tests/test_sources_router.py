@@ -135,3 +135,17 @@ def test_update_source_returns_404_for_unknown_id(app_client):
     response = app_client.put(f"/api/sources/{uuid.uuid4()}", json={"crawl_frequency": 1000})
 
     assert response.status_code == 404
+
+
+def test_update_source_rejects_crawl_frequency_below_minimum(app_client, db_session):
+    source = Source(name="TooFast", domain=f"toofast-{uuid.uuid4()}.example", group_name="G1", is_active=True)
+    db_session.add(source)
+    db_session.commit()
+
+    try:
+        response = app_client.put(f"/api/sources/{source.source_id}", json={"crawl_frequency": 60})
+
+        assert response.status_code == 400
+    finally:
+        db_session.delete(source)
+        db_session.commit()

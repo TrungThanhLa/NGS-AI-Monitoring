@@ -12,6 +12,11 @@ from backend.models import Source, User
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
 _VALID_SOURCE_STATUSES = {"ACTIVE", "INACTIVE"}
+# Ngưỡng tối thiểu chấp nhận qua API — chặn việc lỡ đặt crawl_frequency quá ngắn khiến
+# Beat enqueue quá dày, spam request tới website thật (nguyên tắc "không spam request",
+# rule 11) — phát hiện thật lúc smoke test Docker (2026-07-21) khi test với 60s. FE
+# giới hạn tối thiểu 5 phút (300s) ở form, đây là chốt chặn thật ở tầng API.
+_MIN_CRAWL_FREQUENCY_SECONDS = 300
 
 
 @router.get("")
@@ -60,6 +65,11 @@ def update_source(
     # không cho gán qua API để tránh nhầm lẫn với cơ chế tự động phát hiện lỗi.
     if payload.status is not None and payload.status not in _VALID_SOURCE_STATUSES:
         raise HTTPException(status_code=400, detail=f"status phải là 1 trong {_VALID_SOURCE_STATUSES}")
+    if payload.crawl_frequency is not None and payload.crawl_frequency < _MIN_CRAWL_FREQUENCY_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"crawl_frequency phải >= {_MIN_CRAWL_FREQUENCY_SECONDS} giây (tránh spam request)",
+        )
 
     old_value = {
         "source_group": source.source_group,
