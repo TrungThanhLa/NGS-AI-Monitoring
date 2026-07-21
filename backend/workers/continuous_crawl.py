@@ -202,3 +202,47 @@ def match_campaigns_for_article(db, article: Article) -> None:
         for k in matched:
             db.add(CampaignArticleKeyword(campaign_id=campaign_id, article_id=article.article_id, keyword_id=k.keyword_id))
         db.commit()
+
+
+import asyncio
+
+import httpx
+
+from backend.ai.ollama_client import analyze_article
+from backend.models import ArticleAnalysis
+from backend.system_settings import get_bool_setting
+
+
+def maybe_analyze_article(db, article: Article) -> None:
+    """Nếu AI_AUTO_TRIGGER=true, phân tích AI ngay cho bài NÀY (per-article, KHÔNG theo
+    Campaign — kết quả AI là thuộc tính của nội dung, không đổi theo Campaign nào đang
+    xem, xem lý do đầy đủ ở design spec Phase 3 mục "Vì sao AI phân tích theo bài").
+    Nếu false, giữ nguyên articles.status='pending_analysis', không làm gì thêm."""
+    if not get_bool_setting(db, "AI_AUTO_TRIGGER"):
+        return
+
+    try:
+        result = asyncio.run(analyze_article(article.title or "", article.content_raw or ""))
+    except (ValueError, httpx.HTTPError):
+        article.status = "error"
+        db.commit()
+        return
+
+    db.add(
+        ArticleAnalysis(
+            article_id=article.article_id,
+            job_id=None,
+            topics=result["topics"],
+            keywords=result.get("keywords", []),
+            sentiment=result["sentiment"],
+            emotion=result["emotion"],
+            confidence=result["confidence"],
+            needs_review=result["needs_review"],
+            summary=result.get("summary"),
+            prompt_version=result["prompt_version"],
+            ai_model=result["ai_model"],
+            analysis_duration_seconds=result.get("analysis_duration_seconds"),
+        )
+    )
+    article.status = "analyzed"
+    db.commit()

@@ -289,3 +289,64 @@ def test_match_campaigns_for_article_ignores_non_active_campaign(db_session):
 
     assert db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id).count() == 0
 
+
+from backend.models import ArticleAnalysis, SystemSetting
+from backend.workers.continuous_crawl import maybe_analyze_article
+
+
+def _set_ai_auto_trigger(db_session, value: str):
+    db_session.query(SystemSetting).filter_by(setting_key="AI_AUTO_TRIGGER").update({"setting_value": value})
+    db_session.commit()
+
+
+def test_maybe_analyze_article_does_nothing_when_trigger_disabled(db_session):
+    source = _make_source(db_session, "AI1")
+    article = Article(source_id=source.source_id, url="https://ai1.example/a", url_hash="hai1", status="pending_analysis")
+    db_session.add(article)
+    _set_ai_auto_trigger(db_session, "false")
+
+    maybe_analyze_article(db_session, article)
+
+    assert article.status == "pending_analysis"
+    assert db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).count() == 0
+
+
+def test_maybe_analyze_article_saves_analysis_when_trigger_enabled(db_session, monkeypatch):
+    source = _make_source(db_session, "AI2")
+    article = Article(source_id=source.source_id, url="https://ai2.example/a", url_hash="hai2",
+                       title="Tiêu đề", content_raw="Nội dung", status="pending_analysis")
+    db_session.add(article)
+    _set_ai_auto_trigger(db_session, "true")
+
+    async def fake_analyze_article(title, content, client=None):
+        return {
+            "topics": ["Tin giả và thông tin sai lệch"], "keywords": ["a"], "sentiment": "negative",
+            "emotion": "Fear", "confidence": 0.9, "needs_review": False, "summary": "tóm tắt",
+            "prompt_version": 1, "ai_model": "qwen3:8b", "analysis_duration_seconds": 0.5,
+        }
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.analyze_article", fake_analyze_article)
+
+    maybe_analyze_article(db_session, article)
+
+    assert article.status == "analyzed"
+    analysis = db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).one()
+    assert analysis.job_id is None
+    assert analysis.sentiment == "negative"
+
+
+def test_maybe_analyze_article_marks_error_on_ai_failure(db_session, monkeypatch):
+    source = _make_source(db_session, "AI3")
+    article = Article(source_id=source.source_id, url="https://ai3.example/a", url_hash="hai3",
+                       title="X", content_raw="Y", status="pending_analysis")
+    db_session.add(article)
+    _set_ai_auto_trigger(db_session, "true")
+
+    async def failing_analyze_article(title, content, client=None):
+        raise ValueError("JSON không hợp lệ")
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.analyze_article", failing_analyze_article)
+
+    maybe_analyze_article(db_session, article)
+
+    assert article.status == "error"
