@@ -10,13 +10,19 @@ TOP_KEYWORDS_LIMIT = 20
 UNKNOWN_EMOTION_LABEL = "Không xác định"
 
 
-def aggregate_basic(db: Session, job_id: UUID) -> dict:
-    rows = db.execute(
-        select(Article, ArticleAnalysis, Source)
-        .join(ArticleAnalysis, ArticleAnalysis.article_id == Article.article_id)
-        .join(Source, Source.source_id == Article.source_id)
-        .where(Article.job_id == job_id)
-    ).all()
+def aggregate_basic(db: Session, article_ids: list[UUID]) -> dict:
+    # Tách rời "chọn bài nào" (do caller quyết định — Job lọc theo job_id, Campaign lọc
+    # qua campaign_articles + khoảng ngày) khỏi lõi tổng hợp này — chỉ nhận sẵn danh sách
+    # article_id, không tự query theo job_id/campaign_id nữa (Phase 7).
+    if not article_ids:
+        rows = []
+    else:
+        rows = db.execute(
+            select(Article, ArticleAnalysis, Source)
+            .join(ArticleAnalysis, ArticleAnalysis.article_id == Article.article_id)
+            .join(Source, Source.source_id == Article.source_id)
+            .where(Article.article_id.in_(article_ids))
+        ).all()
 
     articles = []
     sentiment_counts: Counter = Counter()

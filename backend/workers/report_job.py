@@ -252,7 +252,8 @@ def _analyze_articles(db, job: Job) -> None:
 
 
 def _generate_report(db, job: Job) -> None:
-    aggregates = aggregate_basic(db, job.job_id)
+    article_ids = [row[0] for row in db.query(Article.article_id).filter_by(job_id=job.job_id).all()]
+    aggregates = aggregate_basic(db, article_ids)
     storage_path = os.environ.get("STORAGE_PATH", "./storage")
     os.makedirs(storage_path, exist_ok=True)
     output_docx = os.path.join(storage_path, f"{job.job_id}.docx")
