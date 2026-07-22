@@ -299,6 +299,19 @@ def _set_ai_auto_trigger(db_session, value: str):
     db_session.commit()
 
 
+def _make_continuous_campaign_match(db_session, article: Article):
+    # Phase 7 (BR-CAMP-07): maybe_analyze_article giờ chỉ chạy khi bài match ít nhất 1
+    # Campaign CONTINUOUS đang ACTIVE — helper dùng chung cho các test cần trigger AI
+    # chạy thật (không phải test riêng cho việc gating theo mode).
+    campaign = Campaign(name="Chiến dịch dài hạn", start_date="2026-06-01", status="ACTIVE", mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=article.source_id))
+    db_session.add(CampaignArticle(campaign_id=campaign.campaign_id, article_id=article.article_id))
+    db_session.commit()
+    return campaign
+
+
 def test_maybe_analyze_article_does_nothing_when_trigger_disabled(db_session):
     source = _make_source(db_session, "AI1")
     article = Article(source_id=source.source_id, url="https://ai1.example/a", url_hash="hai1", status="pending_analysis")
@@ -316,6 +329,8 @@ def test_maybe_analyze_article_saves_analysis_when_trigger_enabled(db_session, m
     article = Article(source_id=source.source_id, url="https://ai2.example/a", url_hash="hai2",
                        title="Tiêu đề", content_raw="Nội dung", status="pending_analysis")
     db_session.add(article)
+    db_session.commit()
+    _make_continuous_campaign_match(db_session, article)
     _set_ai_auto_trigger(db_session, "true")
 
     async def fake_analyze_article(title, content, client=None):
@@ -340,6 +355,8 @@ def test_maybe_analyze_article_marks_error_on_ai_failure(db_session, monkeypatch
     article = Article(source_id=source.source_id, url="https://ai3.example/a", url_hash="hai3",
                        title="X", content_raw="Y", status="pending_analysis")
     db_session.add(article)
+    db_session.commit()
+    _make_continuous_campaign_match(db_session, article)
     _set_ai_auto_trigger(db_session, "true")
 
     async def failing_analyze_article(title, content, client=None):
@@ -350,3 +367,61 @@ def test_maybe_analyze_article_marks_error_on_ai_failure(db_session, monkeypatch
     maybe_analyze_article(db_session, article)
 
     assert article.status == "error"
+
+
+def test_maybe_analyze_article_skips_when_only_one_shot_campaign_matches(db_session, monkeypatch):
+    # Phase 7 (BR-CAMP-07): AI_AUTO_TRIGGER không áp dụng cho Campaign ONE_SHOT — bài
+    # chỉ match Campaign ONE_SHOT thì KHÔNG được tự động phân tích, dù trigger đang bật.
+    source = _make_source(db_session, "AI4")
+    campaign = Campaign(name="Chiến dịch nhanh", start_date="2026-06-01", status="ACTIVE", mode="ONE_SHOT")
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    article = Article(source_id=source.source_id, url="https://ai4.example/a", url_hash="hai4",
+                       title="T", content_raw="C", status="pending_analysis")
+    db_session.add(article)
+    db_session.commit()
+    db_session.add(CampaignArticle(campaign_id=campaign.campaign_id, article_id=article.article_id))
+    db_session.commit()
+    _set_ai_auto_trigger(db_session, "true")
+
+    called = {"value": False}
+
+    async def fake_analyze_article(title, content, client=None):
+        called["value"] = True
+        return {}
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.analyze_article", fake_analyze_article)
+
+    maybe_analyze_article(db_session, article)
+
+    assert called["value"] is False
+    assert article.status == "pending_analysis"
+
+
+def test_maybe_analyze_article_runs_when_continuous_campaign_matches(db_session, monkeypatch):
+    source = _make_source(db_session, "AI5")
+    campaign = Campaign(name="Chiến dịch dài hạn", start_date="2026-06-01", status="ACTIVE", mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    article = Article(source_id=source.source_id, url="https://ai5.example/a", url_hash="hai5",
+                       title="T", content_raw="C", status="pending_analysis")
+    db_session.add(article)
+    db_session.commit()
+    db_session.add(CampaignArticle(campaign_id=campaign.campaign_id, article_id=article.article_id))
+    db_session.commit()
+    _set_ai_auto_trigger(db_session, "true")
+
+    async def fake_analyze_article(title, content, client=None):
+        return {
+            "topics": ["A"], "keywords": [], "sentiment": "neutral", "emotion": "Trust",
+            "confidence": 0.9, "needs_review": False, "summary": "s",
+            "prompt_version": 1, "ai_model": "qwen3:8b", "analysis_duration_seconds": 1.0,
+        }
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.analyze_article", fake_analyze_article)
+
+    maybe_analyze_article(db_session, article)
+
+    assert article.status == "analyzed"

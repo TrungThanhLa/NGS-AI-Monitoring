@@ -213,12 +213,35 @@ from backend.models import ArticleAnalysis
 from backend.system_settings import get_bool_setting
 
 
+def _has_continuous_campaign_match(db, article: Article) -> bool:
+    """Kiểm tra bài này đã match (campaign_articles) với ít nhất 1 Campaign đang
+    ACTIVE VÀ mode=CONTINUOUS — Campaign ONE_SHOT không tính (Phase 7, BR-CAMP-07)."""
+    return (
+        db.query(CampaignArticle)
+        .join(Campaign, Campaign.campaign_id == CampaignArticle.campaign_id)
+        .filter(
+            CampaignArticle.article_id == article.article_id,
+            Campaign.status == "ACTIVE",
+            Campaign.mode == "CONTINUOUS",
+        )
+        .first()
+        is not None
+    )
+
+
 def maybe_analyze_article(db, article: Article) -> None:
-    """Nếu AI_AUTO_TRIGGER=true, phân tích AI ngay cho bài NÀY (per-article, KHÔNG theo
-    Campaign — kết quả AI là thuộc tính của nội dung, không đổi theo Campaign nào đang
-    xem, xem lý do đầy đủ ở design spec Phase 3 mục "Vì sao AI phân tích theo bài").
-    Nếu false, giữ nguyên articles.status='pending_analysis', không làm gì thêm."""
+    """Nếu AI_AUTO_TRIGGER=true VÀ bài này match ít nhất 1 Campaign CONTINUOUS đang
+    ACTIVE, phân tích AI ngay (per-article, KHÔNG theo Campaign — kết quả AI là thuộc
+    tính của nội dung, không đổi theo Campaign nào đang xem, xem lý do đầy đủ ở design
+    spec Phase 3 mục "Vì sao AI phân tích theo bài"). AI_AUTO_TRIGGER KHÔNG áp dụng cho
+    Campaign ONE_SHOT (Phase 7, BR-CAMP-07) — ONE_SHOT luôn phân tích thủ công qua
+    generate_campaign_report (backend/workers/campaign_tasks.py) khi người dùng bấm
+    "Tạo báo cáo", tránh AI chạy nền liên tục không kiểm soát khi có nhiều Campaign
+    ONE_SHOT chạy song song. Nếu không thỏa điều kiện nào, giữ nguyên
+    articles.status='pending_analysis', không làm gì thêm."""
     if not get_bool_setting(db, "AI_AUTO_TRIGGER"):
+        return
+    if not _has_continuous_campaign_match(db, article):
         return
 
     try:
