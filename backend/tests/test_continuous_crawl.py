@@ -93,7 +93,6 @@ def test_fetch_pending_urls_creates_article_and_resets_error_count(db_session, m
     fetched = fetch_pending_urls(db_session, source)
 
     assert len(fetched) == 1
-    assert fetched[0].job_id is None
     assert fetched[0].source_id == source.source_id
     row = db_session.query(CrawlQueue).filter_by(source_id=source.source_id).one()
     assert row.status == "fetched"
@@ -156,7 +155,7 @@ def test_fetch_pending_urls_skips_gracefully_on_concurrent_duplicate_insert(db_s
     same_url = "https://f5.example/already-fetched-elsewhere"
     same_hash = compute_url_hash(same_url)
     db_session.add(
-        Article(job_id=None, source_id=source.source_id, url=same_url, url_hash=same_hash, title="Đã có rồi")
+        Article(source_id=source.source_id, url=same_url, url_hash=same_hash, title="Đã có rồi")
     )
     db_session.add(CrawlQueue(source_id=source.source_id, url=same_url, url_hash=same_hash, status="pending"))
     db_session.add(CrawlQueue(source_id=source.source_id, url="https://f5.example/b", url_hash="h5b", status="pending"))
@@ -190,7 +189,7 @@ def test_fetch_pending_urls_all_duplicate_cycle_does_not_count_as_error(db_sessi
     same_url = "https://f6.example/already-fetched-elsewhere"
     same_hash = compute_url_hash(same_url)
     db_session.add(
-        Article(job_id=None, source_id=source.source_id, url=same_url, url_hash=same_hash, title="Đã có rồi")
+        Article(source_id=source.source_id, url=same_url, url_hash=same_hash, title="Đã có rồi")
     )
     db_session.add(CrawlQueue(source_id=source.source_id, url=same_url, url_hash=same_hash, status="pending"))
     db_session.commit()
@@ -346,7 +345,6 @@ def test_maybe_analyze_article_saves_analysis_when_trigger_enabled(db_session, m
 
     assert article.status == "analyzed"
     analysis = db_session.query(ArticleAnalysis).filter_by(article_id=article.article_id).one()
-    assert analysis.job_id is None
     assert analysis.sentiment == "negative"
 
 

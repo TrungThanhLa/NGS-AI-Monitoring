@@ -107,7 +107,6 @@ def fetch_pending_urls(db, source: Source) -> list[Article]:
             continue
 
         article = Article(
-            job_id=None,
             source_id=source.source_id,
             url=parsed["url"],
             url_hash=parsed["url_hash"],
@@ -255,7 +254,6 @@ def maybe_analyze_article(db, article: Article) -> None:
     db.add(
         ArticleAnalysis(
             article_id=article.article_id,
-            job_id=None,
             topics=result["topics"],
             keywords=result.get("keywords", []),
             sentiment=result["sentiment"],

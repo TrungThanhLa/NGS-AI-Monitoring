@@ -33,7 +33,7 @@ AGGREGATES = {
 
 
 def _fake_job():
-    return SimpleNamespace(job_id=uuid.uuid4(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
+    return SimpleNamespace(report_id=uuid.uuid4(), date_from=date(2026, 6, 1), date_to=date(2026, 6, 30))
 
 
 def test_generate_docx_writes_readable_file_with_article_title(tmp_path):
@@ -53,13 +53,13 @@ def test_export_json_writes_valid_json_with_counts(tmp_path):
     output_path = tmp_path / "report.json"
     job = _fake_job()
 
-    export_json(str(job.job_id), job.date_from, job.date_to, AGGREGATES, str(output_path))
+    export_json(str(job.report_id), job.date_from, job.date_to, AGGREGATES, str(output_path))
 
     data = json.loads(output_path.read_text(encoding="utf-8"))
     assert data["sentiment_counts"] == {"negative": 1}
     assert data["emotion_counts"] == {"Fear": 1}
     assert data["articles"][0]["title"] == "Cảnh báo deepfake mới"
-    assert data["report_id"] == str(job.job_id)
+    assert data["report_id"] == str(job.report_id)
 
 
 def test_generate_docx_includes_new_aggregate_tables(tmp_path):
@@ -106,7 +106,7 @@ def test_export_json_includes_new_aggregate_fields(tmp_path):
     output_path = tmp_path / "report.json"
     job = _fake_job()
 
-    export_json(str(job.job_id), job.date_from, job.date_to, AGGREGATES, str(output_path))
+    export_json(str(job.report_id), job.date_from, job.date_to, AGGREGATES, str(output_path))
 
     data = json.loads(output_path.read_text(encoding="utf-8"))
     assert data["source_counts"] == {"VTV": 1}

@@ -7,7 +7,6 @@ from backend.models.campaign_keywords import CampaignKeyword
 from backend.models.campaign_sources import CampaignSource
 from backend.models.campaigns import Campaign
 from backend.models.crawl_queue import CrawlQueue
-from backend.models.jobs import Job
 from backend.models.keywords import Keyword
 from backend.models.permissions import Permission
 from backend.models.report_history import ReportHistory
@@ -20,7 +19,6 @@ from backend.models.users import User
 
 __all__ = [
     "Source",
-    "Job",
     "Article",
     "ArticleAnalysis",
     "ReportHistory",

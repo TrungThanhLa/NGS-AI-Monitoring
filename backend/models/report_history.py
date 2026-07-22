@@ -11,8 +11,7 @@ class ReportHistory(Base):
     __tablename__ = "report_history"
 
     report_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.job_id"))  # [SẼ XÓA ở Task 14]
-    campaign_id = Column(UUID(as_uuid=True), ForeignKey("campaigns.campaign_id"))
+    campaign_id = Column(UUID(as_uuid=True), ForeignKey("campaigns.campaign_id"), nullable=False)
     format = Column(String(20), server_default="docx")
     file_path = Column(Text, nullable=False)
     status = Column(String(20), server_default="completed")

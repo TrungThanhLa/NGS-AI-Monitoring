@@ -12,7 +12,6 @@ class ArticleAnalysis(Base):
 
     analysis_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     article_id = Column(UUID(as_uuid=True), ForeignKey("articles.article_id"))
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.job_id"))
     topics = Column(ARRAY(Text), nullable=False)
     keywords = Column(ARRAY(Text), server_default="{}")
     sentiment = Column(String(20))
