@@ -94,7 +94,8 @@ def test_create_campaign_with_sources_and_keywords(app_client, admin_user, sourc
         "/api/campaigns",
         json={
             "name": "Chiến dịch đầy đủ",
-            "start_date": "2026-08-01",
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-01",
             "owner_id": str(admin_user.user_id),
             "mode": "ONE_SHOT",
             "source_ids": [str(source.source_id)],
@@ -297,7 +298,8 @@ def test_create_campaign_allows_duplicate_source_and_keyword_ids(app_client, adm
         "/api/campaigns",
         json={
             "name": "Chiến dịch ID trùng lặp",
-            "start_date": "2026-08-01",
+            "start_date": "2026-06-01",
+            "end_date": "2026-06-01",
             "owner_id": str(admin_user.user_id),
             "mode": "ONE_SHOT",
             "source_ids": [str(source.source_id), str(source.source_id)],
@@ -391,7 +393,7 @@ def test_list_campaign_reports_sorted_newest_first(app_client, admin_user, db_se
 
 def test_activate_one_shot_campaign_dispatches_chord(app_client, admin_user, source, keyword, db_session):
     campaign = Campaign(
-        name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
     )
     db_session.add(campaign)
     db_session.flush()
@@ -439,3 +441,70 @@ def test_list_all_reports_history_includes_campaign_name(app_client, admin_user,
     assert len(rows) > 0
     assert rows[0]["campaign_name"] == "Chiến dịch ABC"
     assert rows[0]["format"] == "docx"
+
+
+def test_create_one_shot_campaign_requires_end_date(app_client, admin_user):
+    response = app_client.post(
+        "/api/campaigns",
+        json={"name": "C", "owner_id": str(admin_user.user_id), "start_date": "2026-06-01", "mode": "ONE_SHOT"},
+    )
+    assert response.status_code == 400
+    assert "Ngày kết thúc" in response.json()["detail"]
+
+
+def test_create_one_shot_campaign_rejects_future_end_date(app_client, admin_user):
+    response = app_client.post(
+        "/api/campaigns",
+        json={
+            "name": "C", "owner_id": str(admin_user.user_id), "start_date": "2026-06-01",
+            "end_date": "2099-01-01", "mode": "ONE_SHOT",
+        },
+    )
+    assert response.status_code == 400
+    assert "quá khứ" in response.json()["detail"]
+
+
+def test_create_one_shot_campaign_accepts_past_end_date(app_client, admin_user):
+    response = app_client.post(
+        "/api/campaigns",
+        json={
+            "name": "C", "owner_id": str(admin_user.user_id), "start_date": "2026-06-01",
+            "end_date": "2026-06-05", "mode": "ONE_SHOT",
+        },
+    )
+    assert response.status_code == 201
+
+
+def test_create_continuous_campaign_does_not_require_end_date(app_client, admin_user):
+    response = app_client.post(
+        "/api/campaigns",
+        json={"name": "C", "owner_id": str(admin_user.user_id), "start_date": "2026-06-01", "mode": "CONTINUOUS"},
+    )
+    assert response.status_code == 201
+
+
+def test_update_campaign_to_one_shot_without_end_date_rejected(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.put(f"/api/campaigns/{campaign.campaign_id}", json={"mode": "ONE_SHOT"})
+
+    assert response.status_code == 400
+
+
+def test_activate_one_shot_campaign_without_end_date_rejected(app_client, admin_user, source, keyword, db_session):
+    # Campaign cũ tạo trước khi có validate này (ORM thẳng, bỏ qua create endpoint) —
+    # activate vẫn phải chặn (defense-in-depth)
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 400

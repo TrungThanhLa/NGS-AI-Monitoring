@@ -1,3 +1,4 @@
+from datetime import date, datetime
 import uuid
 
 from celery import chord
@@ -25,6 +26,31 @@ _REPORT_MEDIA_TYPES = {
 }
 
 _VALID_MODES = {"CONTINUOUS", "ONE_SHOT"}
+
+
+def _validate_one_shot_date_range(mode: str, end_date_value) -> None:
+    """BR-CAMP mới (2026-07-22): ONE_SHOT chỉ dùng cho dữ liệu quá khứ — bắt buộc có
+    end_date và end_date <= hôm nay. Nhận end_date_value dạng str (payload thô, ISO
+    'YYYY-MM-DD') hoặc datetime/None (campaign.end_date đã load từ DB) để dùng chung
+    được ở cả create/update (payload) lẫn activate (giá trị đã lưu)."""
+    if mode != "ONE_SHOT":
+        return
+    if end_date_value is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Chiến dịch 'Tạo báo cáo nhanh' (ONE_SHOT) bắt buộc phải có Ngày kết thúc",
+        )
+    if isinstance(end_date_value, str):
+        parsed = date.fromisoformat(end_date_value)
+    elif isinstance(end_date_value, datetime):
+        parsed = end_date_value.date()
+    else:
+        parsed = end_date_value
+    if parsed > date.today():
+        raise HTTPException(
+            status_code=400,
+            detail="Chiến dịch 'Tạo báo cáo nhanh' (ONE_SHOT) chỉ áp dụng cho khoảng ngày trong quá khứ (Ngày kết thúc phải <= hôm nay)",
+        )
 
 
 def _campaign_source_ids(db: Session, campaign_id) -> list[str]:
@@ -123,6 +149,7 @@ def create_campaign(
 
     if payload.mode not in _VALID_MODES:
         raise HTTPException(status_code=400, detail=f"mode phải là 1 trong {_VALID_MODES}")
+    _validate_one_shot_date_range(payload.mode, payload.end_date)
 
     sources = _resolve_sources(db, payload.source_ids)
     kws = _resolve_keywords(db, payload.keyword_ids)
@@ -239,6 +266,8 @@ def update_campaign(
     if payload.alert_threshold is not None:
         campaign.alert_threshold = payload.alert_threshold
 
+    _validate_one_shot_date_range(campaign.mode, campaign.end_date)
+
     if payload.source_ids is not None:
         sources = _resolve_sources(db, payload.source_ids)
         db.query(CampaignSource).filter_by(campaign_id=campaign.campaign_id).delete()
@@ -310,6 +339,7 @@ def activate_campaign(
             status_code=400,
             detail=f"Không thể kích hoạt chiến dịch đang ở trạng thái {campaign.status}",
         )
+    _validate_one_shot_date_range(campaign.mode, campaign.end_date)
 
     # BR-CAMP-03: chỉ chuyển ACTIVE khi có >=1 nguồn VÀ >=1 từ khóa
     has_source = db.query(CampaignSource).filter_by(campaign_id=campaign.campaign_id).first() is not None
