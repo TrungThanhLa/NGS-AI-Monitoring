@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { App, Button, Card, Col, DatePicker, Descriptions, Row, Select, Space, Table, Tag, Tooltip } from 'antd'
+import { App, Button, Card, Col, DatePicker, Descriptions, Progress, Row, Select, Space, Table, Tag, Tooltip } from 'antd'
 import { EditOutlined, ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import StatusTag from '@/components/common/StatusTag'
@@ -31,6 +31,25 @@ type ReportRow = {
   created_at: string
 }
 
+type CrawlProgressSourceOneShot = {
+  source_id: string
+  source_name: string
+  total_urls: number | null
+  done_urls: number
+  status: string
+}
+type CrawlProgressSourceContinuous = {
+  source_id: string
+  source_name: string
+  last_crawled_at: string | null
+  source_status: string
+  pending_count: number
+  matched_last_24h: number
+}
+type CrawlProgress =
+  | { mode: 'ONE_SHOT'; sources: CrawlProgressSourceOneShot[]; overall_percent: number }
+  | { mode: 'CONTINUOUS'; sources: CrawlProgressSourceContinuous[] }
+
 const FORMAT_OPTIONS = [
   { value: 'docx', label: 'Word (.docx)' },
   { value: 'pdf', label: 'PDF' },
@@ -49,6 +68,7 @@ export default function CampaignDetail() {
   const [reportRange, setReportRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [reportFormat, setReportFormat] = useState('docx')
   const [creatingReport, setCreatingReport] = useState(false)
+  const [crawlProgress, setCrawlProgress] = useState<CrawlProgress | null>(null)
   const hasPrefilledRange = useRef(false)
 
   function loadCampaign() {
@@ -68,10 +88,14 @@ export default function CampaignDetail() {
   function loadReports() {
     authFetch(`/api/campaigns/${id}/reports`).then((r) => r.json()).then((d) => setReports(d.reports ?? []))
   }
+  function loadCrawlProgress() {
+    authFetch(`/api/campaigns/${id}/crawl-progress`).then((r) => r.json()).then(setCrawlProgress)
+  }
 
   useEffect(() => {
     loadCampaign()
     loadReports()
+    loadCrawlProgress()
   }, [id])
 
   // Polling danh sách report mỗi 3s khi có report đang pending/running — dừng khi
@@ -82,6 +106,13 @@ export default function CampaignDetail() {
     const interval = setInterval(loadReports, 3000)
     return () => clearInterval(interval)
   }, [reports])
+
+  // Poll tiến độ crawl mỗi 3s khi Campaign đang ACTIVE — dừng khi COMPLETED/PAUSED/ARCHIVED
+  useEffect(() => {
+    if (campaign?.status !== 'ACTIVE') return
+    const interval = setInterval(loadCrawlProgress, 3000)
+    return () => clearInterval(interval)
+  }, [campaign?.status])
 
   if (!campaign) return <LoadingState />
 
@@ -254,6 +285,40 @@ export default function CampaignDetail() {
           ]}
         />
       </Card>
+
+      {crawlProgress && (
+        <Card title="Tiến độ crawl" style={{ borderRadius: 12, marginTop: 16 }}>
+          {crawlProgress.mode === 'ONE_SHOT' ? (
+            <Space direction="vertical" style={{ width: '100%' }}>
+              <Progress percent={crawlProgress.overall_percent} />
+              {crawlProgress.sources.map((s) => (
+                <div key={s.source_id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>{s.source_name}</span>
+                  <span>
+                    {s.done_urls}/{s.total_urls ?? '…'} ({s.status})
+                  </span>
+                </div>
+              ))}
+            </Space>
+          ) : (
+            <Table
+              rowKey="source_id"
+              dataSource={crawlProgress.sources}
+              pagination={false}
+              columns={[
+                { title: 'Nguồn', dataIndex: 'source_name' },
+                {
+                  title: 'Lần crawl gần nhất',
+                  dataIndex: 'last_crawled_at',
+                  render: (v: string | null) => (v ? new Date(v).toLocaleString('vi-VN') : 'Chưa crawl'),
+                },
+                { title: 'Bài mới khớp (24h)', dataIndex: 'matched_last_24h' },
+                { title: 'Hàng đợi còn lại', dataIndex: 'pending_count' },
+              ]}
+            />
+          )}
+        </Card>
+      )}
     </div>
   )
 }
