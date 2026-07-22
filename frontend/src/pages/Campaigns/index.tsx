@@ -1,11 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Card, Input, Select, Space, Table, Tag } from 'antd'
 import { PlusOutlined, SearchOutlined, EyeOutlined, EditOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
-import { campaigns as mockCampaigns } from '@/data/mockData'
 import StatusTag from '@/components/common/StatusTag'
 import PageHeader from '@/components/common/PageHeader'
+import { authFetch } from '@/lib/api'
 import dayjs from 'dayjs'
+
+type CampaignRow = {
+  campaign_id: string
+  code: string | null
+  name: string
+  status: string
+  start_date: string
+  end_date: string | null
+  source_ids: string[]
+  keyword_ids: string[]
+}
 
 const STATUS_OPTIONS = [
   { value: '', label: 'Tất cả trạng thái' },
@@ -18,56 +29,47 @@ const STATUS_OPTIONS = [
 
 export default function CampaignsPage() {
   const navigate = useNavigate()
-  const [data] = useState(mockCampaigns)
-  const isLoading = false
+  const [data, setData] = useState<CampaignRow[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [keyword, setKeyword] = useState('')
   const [status, setStatus] = useState<string>('')
 
-  const filtered = data.filter(
-    (c) =>
-      (!keyword || c.name.toLowerCase().includes(keyword.toLowerCase())) &&
-      (!status || c.status === status),
-  )
+  useEffect(() => {
+    setIsLoading(true)
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (keyword) params.set('keyword', keyword)
+    authFetch(`/api/campaigns?${params.toString()}`)
+      .then((r) => (r.ok ? r.json() : { campaigns: [] }))
+      .then((d) => setData(d.campaigns ?? []))
+      .finally(() => setIsLoading(false))
+  }, [status, keyword])
 
   const columns = [
-    { title: 'Mã', dataIndex: 'code', key: 'code', width: 120, render: (v: string) => <Tag>{v}</Tag> },
+    { title: 'Mã', dataIndex: 'code', key: 'code', width: 120, render: (v: string | null) => (v ? <Tag>{v}</Tag> : '—') },
     {
       title: 'Tên chiến dịch',
       dataIndex: 'name',
       key: 'name',
-      render: (v: string, r: { id: string }) => (
-        <a onClick={() => navigate(`/campaigns/${r.id}`)} style={{ color: '#0B1F3A', fontWeight: 500 }}>
+      render: (v: string, r: CampaignRow) => (
+        <a onClick={() => navigate(`/campaigns/${r.campaign_id}`)} style={{ color: '#0B1F3A', fontWeight: 500 }}>
           {v}
         </a>
       ),
     },
-    {
-      title: 'Trạng thái',
-      dataIndex: 'status',
-      key: 'status',
-      render: (v: string) => <StatusTag type="campaign" value={v} />,
-    },
-    { title: 'Người tạo', dataIndex: 'owner_name', key: 'owner_name' },
-    {
-      title: 'Ngày bắt đầu',
-      dataIndex: 'start_date',
-      key: 'start_date',
-      render: (v: string) => (v ? dayjs(v).format('DD/MM/YYYY') : '—'),
-    },
-    {
-      title: 'Ngày kết thúc',
-      dataIndex: 'end_date',
-      key: 'end_date',
-      render: (v: string) => (v ? dayjs(v).format('DD/MM/YYYY') : '—'),
-    },
+    { title: 'Trạng thái', dataIndex: 'status', key: 'status', render: (v: string) => <StatusTag type="campaign" value={v} /> },
+    { title: 'Số nguồn', render: (_: unknown, r: CampaignRow) => r.source_ids.length },
+    { title: 'Số từ khóa', render: (_: unknown, r: CampaignRow) => r.keyword_ids.length },
+    { title: 'Ngày bắt đầu', dataIndex: 'start_date', render: (v: string) => (v ? dayjs(v).format('DD/MM/YYYY') : '—') },
+    { title: 'Ngày kết thúc', dataIndex: 'end_date', render: (v: string | null) => (v ? dayjs(v).format('DD/MM/YYYY') : '—') },
     {
       title: 'Thao tác',
       key: 'actions',
       width: 120,
-      render: (_: unknown, r: { id: string }) => (
+      render: (_: unknown, r: CampaignRow) => (
         <Space>
-          <Button type="text" icon={<EyeOutlined />} onClick={() => navigate(`/campaigns/${r.id}`)} />
-          <Button type="text" icon={<EditOutlined />} onClick={() => navigate(`/campaigns/${r.id}/edit`)} />
+          <Button type="text" icon={<EyeOutlined />} onClick={() => navigate(`/campaigns/${r.campaign_id}`)} />
+          <Button type="text" icon={<EditOutlined />} onClick={() => navigate(`/campaigns/${r.campaign_id}/edit`)} />
         </Space>
       ),
     },
@@ -96,23 +98,15 @@ export default function CampaignsPage() {
             style={{ width: 280 }}
             allowClear
           />
-          <Select
-            value={status}
-            onChange={(v) => setStatus(v)}
-            options={STATUS_OPTIONS}
-            style={{ width: 180 }}
-          />
+          <Select value={status} onChange={(v) => setStatus(v)} options={STATUS_OPTIONS} style={{ width: 180 }} />
         </Space>
 
         <Table
           columns={columns}
-          dataSource={filtered}
-          rowKey="id"
+          dataSource={data}
+          rowKey="campaign_id"
           loading={isLoading}
-          pagination={{
-            pageSize: 20,
-            showTotal: (t) => `Tổng ${t} chiến dịch`,
-          }}
+          pagination={{ pageSize: 20, showTotal: (t) => `Tổng ${t} chiến dịch` }}
         />
       </Card>
     </div>
