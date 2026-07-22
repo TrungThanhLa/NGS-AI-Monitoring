@@ -1,9 +1,10 @@
 import uuid
 from datetime import date
+from unittest.mock import patch
 
 from backend.crawler.article import compute_url_hash
 from backend.models import CrawlQueue, Source
-from backend.workers.continuous_crawl import discover_source_urls
+from backend.workers.continuous_crawl import crawl_task, discover_source_urls
 
 
 def test_discover_source_urls_inserts_new_pending_rows(db_session, monkeypatch):
@@ -473,3 +474,25 @@ def test_get_candidates_routes_sitemap_pages_source_through_get_article_urls(db_
 
     mock_listing.assert_not_called()
     mock_sitemap.assert_called_once()
+
+
+def test_crawl_task_swallows_discover_exception_so_chord_callback_still_fires(db_session, monkeypatch):
+    # Regression Important #2: crawl_task là 1 phần tử của Celery chord (mode=ONE_SHOT) —
+    # nếu 1 Source lỗi ngay ở bước Discover (VD sitemap/listing lỗi mạng, không có
+    # try/except riêng như fetch_pending_urls đã có cho từng URL) làm crawl_task raise,
+    # Celery sẽ KHÔNG chạy callback mark_crawl_done cho cả group, khiến Campaign kẹt mãi
+    # ở ACTIVE. crawl_task phải tự nuốt lỗi (log lại), không raise ra ngoài.
+    source = Source(name="X", domain=f"x-{uuid.uuid4()}.example", group_name="G", is_active=True, status="ACTIVE")
+    db_session.add(source)
+    db_session.flush()
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.SessionLocal", lambda: db_session)
+
+    def _raise_discover(*args, **kwargs):
+        raise RuntimeError("sitemap bị chặn WAF (giả lập)")
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.discover_source_urls", _raise_discover)
+
+    # .run() chạy đồng bộ, không qua Celery broker — nếu implementation vẫn để lỗi raise,
+    # dòng dưới sẽ raise RuntimeError và test fail đúng như mong đợi khi bug còn tồn tại.
+    crawl_task.run(str(source.source_id))

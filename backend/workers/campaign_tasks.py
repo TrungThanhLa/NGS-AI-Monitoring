@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 import httpx
 from sqlalchemy import select
@@ -32,7 +32,13 @@ def resolve_campaign_article_ids(db: Session, campaign_id, date_from: date, date
     """Chỉ lấy bài đã match từ khóa của Campaign này (qua campaign_articles — BR-CAMP-03
     áp dụng đồng nhất mọi mode, không đọc thẳng articles theo source_id), lọc theo
     published_at thật của bài (giữ đúng ý nghĩa date_from/date_to như luồng Job cũ), không
-    phải matched_at (thời điểm hệ thống ghi nhận match)."""
+    phải matched_at (thời điểm hệ thống ghi nhận match).
+
+    published_at là TIMESTAMP còn date_from/date_to là date thuần — Postgres cast date_to
+    thành đúng 00:00:00 ngày đó khi so sánh, nên so sánh "<=date_to" sẽ bỏ sót gần như
+    toàn bộ ngày cuối cùng (mọi bài đăng sau 00:00:00 hôm đó). Dùng "< date_to + 1 ngày"
+    (đầu ngày kế tiếp) để bao trọn vẹn cả ngày date_to — giữ đúng hành vi full-day
+    inclusive 2 đầu như luồng Job cũ (so sánh published_at.date() <= job.date_to)."""
     rows = (
         db.execute(
             select(Article.article_id)
@@ -41,7 +47,7 @@ def resolve_campaign_article_ids(db: Session, campaign_id, date_from: date, date
                 CampaignArticle.campaign_id == campaign_id,
                 Article.published_at.isnot(None),
                 Article.published_at >= date_from,
-                Article.published_at <= date_to,
+                Article.published_at < date_to + timedelta(days=1),
             )
         )
         .scalars()

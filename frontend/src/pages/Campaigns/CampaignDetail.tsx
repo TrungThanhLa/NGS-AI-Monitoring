@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import StatusTag from '@/components/common/StatusTag'
 import PageHeader from '@/components/common/PageHeader'
 import LoadingState from '@/components/common/LoadingState'
+import PermissionGuard from '@/components/common/PermissionGuard'
 import { authFetch } from '@/lib/api'
 import dayjs, { Dayjs } from 'dayjs'
 
@@ -146,11 +147,17 @@ export default function CampaignDetail() {
               Chỉnh sửa
             </Button>
             {(campaign.status === 'DRAFT' || campaign.status === 'PAUSED') && (
-              <Button type="primary" onClick={handleActivate}>
-                Kích hoạt
-              </Button>
+              <PermissionGuard permission="campaign.update">
+                <Button type="primary" onClick={handleActivate}>
+                  Kích hoạt
+                </Button>
+              </PermissionGuard>
             )}
-            {campaign.status === 'ACTIVE' && <Button onClick={handlePause}>Tạm dừng</Button>}
+            {campaign.status === 'ACTIVE' && (
+              <PermissionGuard permission="campaign.update">
+                <Button onClick={handlePause}>Tạm dừng</Button>
+              </PermissionGuard>
+            )}
           </Space>
         }
       />
@@ -198,9 +205,11 @@ export default function CampaignDetail() {
             format="DD/MM/YYYY"
           />
           <Select value={reportFormat} onChange={setReportFormat} options={FORMAT_OPTIONS} style={{ width: 180 }} />
-          <Button type="primary" icon={<PlusOutlined />} loading={creatingReport} disabled={!reportRange} onClick={handleCreateReport}>
-            Tạo báo cáo
-          </Button>
+          <PermissionGuard permission="report.create">
+            <Button type="primary" icon={<PlusOutlined />} loading={creatingReport} disabled={!reportRange} onClick={handleCreateReport}>
+              Tạo báo cáo
+            </Button>
+          </PermissionGuard>
         </Space>
 
         <Table<ReportRow>

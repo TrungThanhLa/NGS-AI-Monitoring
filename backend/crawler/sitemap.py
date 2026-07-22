@@ -143,7 +143,8 @@ def _fetch_declared_sitemap_pages(
     max_retries: int,
 ) -> tuple[list[dict], list[str]]:
     # Sub-sitemap chia theo CHỦ ĐỀ (VD tingia.gov.vn) — 1 bài có thể nằm ở nhiều sub-sitemap,
-    # dedup theo URL để không trả về trùng (tránh report_job.py fetch cùng 1 bài 2 lần).
+    # dedup theo URL để không trả về trùng (tránh caller — continuous_crawl.py, trước đây là
+    # report_job.py đã bị xóa ở Phase 7 — fetch cùng 1 bài 2 lần).
     seen: set[str] = set()
     results: list[dict] = []
     failed: list[str] = []
@@ -217,7 +218,9 @@ def get_article_urls(
             # Site chặn tạm thời (403/WAF) hoặc lỗi mạng hết retry — KHÔNG được âm thầm coi
             # như "sitemap phẳng không có bài" (bug thật đã gặp với vietnam.vn 2026-07-08: job
             # báo completed với 0 bài, không ai biết là do bị chặn). Trả về như 1 URL lỗi để
-            # report_job.py insert Article(status="error"), hiện rõ trên bảng crawl trực tiếp.
+            # caller biết mà xử lý (report_job.py — đã bị xóa ở Phase 7 — từng insert
+            # Article(status="error") cho URL này để hiện rõ trên bảng crawl trực tiếp; caller
+            # hiện tại continuous_crawl.py chưa làm lại việc này, chỉ nhận về danh sách lỗi).
             if index_resp is not None:
                 logger.warning(
                     "Fetch sitemap index thất bại (HTTP %d): %s",
@@ -231,8 +234,11 @@ def get_article_urls(
             # Sitemap phẳng (urlset liệt kê <url> trực tiếp, không qua sub-sitemap) — VD
             # bocongan.gov.vn. KHÔNG lọc theo <lastmod> ở đây vì một số nguồn ghi <lastmod>
             # giống nhau cho mọi URL (timestamp build lại sitemap, không phải ngày đăng thật,
-            # đã verify thật) — lọc theo ngày đăng thật được làm ở report_job.py sau khi fetch
-            # xong từng bài.
+            # đã verify thật) — lọc theo ngày đăng thật được làm SAU khi fetch xong từng bài
+            # (report_job.py làm việc này ở luồng Job on-demand cũ, đã bị xóa ở Phase 7; ở
+            # luồng campaign hiện tại, lọc theo published_at nằm ở
+            # campaign_tasks.resolve_campaign_article_ids, chạy lúc build report — không lọc
+            # ngay lúc crawl vì continuous crawl không còn khái niệm date_from/date_to cứng).
             return _extract_all_urls(index_soup), []
 
         pattern = _SITEMAP_DATE_PATTERNS.get(source.domain)

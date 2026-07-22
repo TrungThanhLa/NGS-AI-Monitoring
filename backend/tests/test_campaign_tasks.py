@@ -43,6 +43,26 @@ def test_resolve_campaign_article_ids_filters_by_published_at_range(db_session):
     assert result == [in_range.article_id]
 
 
+def test_resolve_campaign_article_ids_includes_articles_late_on_end_date(db_session):
+    # Regression: published_at là TIMESTAMP, date_to là date thuần — Postgres cast date_to
+    # thành 00:00:00 khi so sánh "<=". Bài đăng cuối ngày date_to (VD 23:00) trước đây bị
+    # loại oan khỏi báo cáo dù rõ ràng thuộc phạm vi date_from..date_to.
+    campaign = _make_campaign(db_session)
+    source = _make_source(db_session)
+    late_on_end_date = Article(
+        source_id=source.source_id, url="https://x.vn/a1", url_hash=f"h-{uuid.uuid4()}",
+        published_at=datetime(2026, 6, 30, 23, 0, 0), status="analyzed",
+    )
+    db_session.add(late_on_end_date)
+    db_session.flush()
+    db_session.add(CampaignArticle(campaign_id=campaign.campaign_id, article_id=late_on_end_date.article_id))
+    db_session.commit()
+
+    result = resolve_campaign_article_ids(db_session, campaign.campaign_id, date(2026, 6, 1), date(2026, 6, 30))
+
+    assert result == [late_on_end_date.article_id]
+
+
 def test_resolve_campaign_article_ids_excludes_articles_from_other_campaigns(db_session):
     campaign_a = _make_campaign(db_session)
     campaign_b = _make_campaign(db_session)

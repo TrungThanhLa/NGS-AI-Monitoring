@@ -100,8 +100,11 @@ async def analyze_articles_batch(
     try:
         tasks = [_bounded(title, content) for title, content in articles]
         # return_exceptions=True: 1 bài lỗi (JSON không hợp lệ / lỗi HTTP) không được raise
-        # ra ngoài làm hỏng cả batch — trả về Exception ngay đúng vị trí bài đó, để caller
-        # (_analyze_articles trong report_job.py) tự quyết định insert status="error".
+        # ra ngoài làm hỏng cả batch — trả về Exception ngay đúng vị trí bài đó, để caller tự
+        # quyết định insert status="error" cho đúng bài đó (report_job.py — nơi hàm này được
+        # gọi trong luồng Job on-demand cũ — đã bị xóa ở Phase 7; hàm này hiện không còn nơi
+        # nào trong code gọi tới, campaign_tasks.py chủ động không dùng lại, xem comment ở
+        # _analyze_pending_articles trong campaign_tasks.py).
         return await asyncio.gather(*tasks, return_exceptions=True)
     finally:
         if owns_client:

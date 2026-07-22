@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -20,6 +21,8 @@ from backend.models import (
     Keyword,
     Source,
 )
+
+logger = logging.getLogger(__name__)
 
 # Discover không giới hạn CỨNG theo date_from/date_to như Job on-demand — nhưng KHÔNG
 # quét từ "vô hạn trong quá khứ" (đã thử date(2000,1,1) và phát hiện bug thật: với
@@ -286,10 +289,20 @@ def crawl_task(source_id: str) -> None:
         source = db.get(Source, uuid.UUID(source_id))
         if source is None:
             return
-        discover_source_urls(db, source)
-        fetched_articles = fetch_pending_urls(db, source)
-        for article in fetched_articles:
-            match_campaigns_for_article(db, article)
-            maybe_analyze_article(db, article)
+        try:
+            discover_source_urls(db, source)
+            fetched_articles = fetch_pending_urls(db, source)
+            for article in fetched_articles:
+                match_campaigns_for_article(db, article)
+                maybe_analyze_article(db, article)
+        except Exception:
+            # KHÔNG được để lỗi 1 Source (VD Discover gọi sitemap/listing lỗi mạng, không có
+            # try/except riêng như fetch_pending_urls đã có cho từng URL) raise ra ngoài task —
+            # crawl_task là 1 phần tử trong Celery chord (mode=ONE_SHOT, xem
+            # routers/campaigns.py::activate_campaign): nếu raise, Celery KHÔNG chạy callback
+            # mark_crawl_done cho cả group, khiến Campaign kẹt mãi ở ACTIVE dù các Source khác
+            # crawl thành công (xem thiết kế Phase 7 "Error Handling"). Log lại để vận hành biết
+            # Source nào lỗi, nhưng để task tự coi là hoàn thành từ góc nhìn Celery.
+            logger.exception("crawl_task thất bại cho source_id=%s", source_id)
     finally:
         db.close()
