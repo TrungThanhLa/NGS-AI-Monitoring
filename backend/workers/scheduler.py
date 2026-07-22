@@ -13,7 +13,7 @@ def list_due_sources(db, now: datetime | None = None) -> list[Source]:
     watched_source_ids = (
         db.query(CampaignSource.source_id)
         .join(Campaign, Campaign.campaign_id == CampaignSource.campaign_id)
-        .filter(Campaign.status == "ACTIVE")
+        .filter(Campaign.status == "ACTIVE", Campaign.mode == "CONTINUOUS")
         .distinct()
         .all()
     )
