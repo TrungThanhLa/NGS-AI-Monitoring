@@ -8,7 +8,18 @@ from fastapi.testclient import TestClient
 
 from backend.auth.dependencies import get_current_user
 from backend.db import get_db
-from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Role, Source, User, UserRole
+from backend.models import (
+    Campaign,
+    CampaignCrawlProgress,
+    CampaignKeyword,
+    CampaignSource,
+    Keyword,
+    ReportHistory,
+    Role,
+    Source,
+    User,
+    UserRole,
+)
 from backend.routers import campaigns, report_history
 
 
@@ -408,6 +419,26 @@ def test_activate_one_shot_campaign_dispatches_chord(app_client, admin_user, sou
     assert response.status_code == 200
     assert response.json()["status"] == "ACTIVE"
     mock_chord.assert_called_once()
+
+
+def test_activate_one_shot_campaign_creates_progress_rows(app_client, admin_user, source, keyword, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        mock_chord.return_value.return_value = MagicMock()
+        app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert progress.status == "pending"
 
 
 def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_user, source, keyword, db_session):

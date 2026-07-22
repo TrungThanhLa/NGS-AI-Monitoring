@@ -10,9 +10,8 @@ from sqlalchemy.orm import Session
 from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
-from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Source, User
-from backend.workers import continuous_crawl
-from backend.workers.campaign_tasks import generate_campaign_report, mark_crawl_done
+from backend.models import Campaign, CampaignCrawlProgress, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Source, User
+from backend.workers.campaign_tasks import crawl_campaign_source_once, generate_campaign_report, mark_crawl_done
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -370,8 +369,14 @@ def activate_campaign(
     # song song, callback mark_crawl_done chỉ chạy SAU KHI TẤT CẢ đã xong.
     if campaign.mode == "ONE_SHOT":
         source_ids = _campaign_source_ids(db, campaign.campaign_id)
+        for sid in source_ids:
+            db.add(CampaignCrawlProgress(campaign_id=campaign.campaign_id, source_id=uuid.UUID(sid)))
+        db.commit()
+
+        date_from = campaign.start_date.date().isoformat()
+        date_to = campaign.end_date.date().isoformat()
         chord(
-            (continuous_crawl.crawl_task.s(sid) for sid in source_ids),
+            (crawl_campaign_source_once.s(str(campaign.campaign_id), sid, date_from, date_to) for sid in source_ids),
             mark_crawl_done.s(str(campaign.campaign_id)),
         ).apply_async()
 
