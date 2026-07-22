@@ -204,7 +204,7 @@ export default function ReportCreate() {
           </div>
 
           <Space>
-            <PermissionGuard permission="report.create">
+            <PermissionGuard permission="campaign.create">
               <Button type="primary" disabled={disabled} loading={submitting} onClick={handleSubmit}>
                 Tạo báo cáo
               </Button>
