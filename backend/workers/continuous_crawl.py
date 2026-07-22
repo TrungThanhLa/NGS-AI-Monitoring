@@ -191,6 +191,14 @@ def match_campaigns_for_article(db, article: Article) -> None:
         if not matched:
             continue
 
+        already_matched = (
+            db.query(CampaignArticle)
+            .filter_by(campaign_id=campaign_id, article_id=article.article_id)
+            .first()
+        )
+        if already_matched is not None:
+            continue
+
         db.add(
             CampaignArticle(
                 campaign_id=campaign_id, article_id=article.article_id, matched_keyword_id=matched[0].keyword_id

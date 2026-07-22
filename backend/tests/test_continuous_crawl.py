@@ -290,6 +290,25 @@ def test_match_campaigns_for_article_ignores_non_active_campaign(db_session):
     assert db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id).count() == 0
 
 
+def test_match_campaigns_for_article_is_idempotent_when_called_twice(db_session):
+    source = _make_source(db_session, "MatchIdem")
+    campaign = Campaign(name="C", start_date="2026-08-01", status="ACTIVE")
+    kw = Keyword(keyword="lừa đảo")
+    db_session.add_all([campaign, kw])
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw.keyword_id))
+    article = Article(source_id=source.source_id, url="https://mi.example/a", url_hash="hmi", title="Cảnh báo lừa đảo")
+    db_session.add(article)
+    db_session.commit()
+
+    match_campaigns_for_article(db_session, article)
+    match_campaigns_for_article(db_session, article)  # gọi lại lần 2 — không được raise
+
+    rows = db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id, article_id=article.article_id).all()
+    assert len(rows) == 1
+
+
 from backend.models import ArticleAnalysis, SystemSetting
 from backend.workers.continuous_crawl import maybe_analyze_article
 
