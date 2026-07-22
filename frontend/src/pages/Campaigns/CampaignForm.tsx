@@ -14,6 +14,7 @@ export default function CampaignForm() {
   const isEdit = !!id
   const navigate = useNavigate()
   const [form] = Form.useForm()
+  const modeValue = Form.useWatch('mode', form)
   const { message } = App.useApp()
   const { user } = useAuth()
 
@@ -119,8 +120,23 @@ export default function CampaignForm() {
             <Form.Item name="start_date" label="Ngày bắt đầu" style={{ flex: 1 }} rules={[{ required: true, message: 'Bắt buộc' }]}>
               <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
             </Form.Item>
-            <Form.Item name="end_date" label="Ngày kết thúc" style={{ flex: 1 }}>
-              <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+            <Form.Item
+              name="end_date"
+              label="Ngày kết thúc"
+              style={{ flex: 1 }}
+              rules={[
+                {
+                  required: modeValue === 'ONE_SHOT',
+                  message: 'Chiến dịch "Tạo báo cáo nhanh" bắt buộc phải có Ngày kết thúc',
+                },
+              ]}
+              extra={modeValue === 'ONE_SHOT' ? 'Chỉ chọn được ngày trong quá khứ (đến hôm nay)' : undefined}
+            >
+              <DatePicker
+                style={{ width: '100%' }}
+                format="DD/MM/YYYY"
+                disabledDate={(d) => modeValue === 'ONE_SHOT' && d.isAfter(dayjs(), 'day')}
+              />
             </Form.Item>
           </Space>
 
