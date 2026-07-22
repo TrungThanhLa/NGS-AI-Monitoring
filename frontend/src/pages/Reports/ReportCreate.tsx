@@ -183,11 +183,21 @@ export default function ReportCreate() {
               <Space style={{ display: "flex", marginBottom: 12 }}>
                 <div>
                   <Typography.Text>Từ ngày</Typography.Text>
-                  <DatePicker value={dateFrom} onChange={(v) => v && setDateFrom(v)} style={{ display: "block" }} />
+                  <DatePicker
+                    value={dateFrom}
+                    onChange={(v) => v && setDateFrom(v)}
+                    style={{ display: "block" }}
+                    disabledDate={(d) => d.isAfter(dayjs(), "day")}
+                  />
                 </div>
                 <div>
                   <Typography.Text>Đến ngày</Typography.Text>
-                  <DatePicker value={dateTo} onChange={(v) => v && setDateTo(v)} style={{ display: "block" }} />
+                  <DatePicker
+                    value={dateTo}
+                    onChange={(v) => v && setDateTo(v)}
+                    style={{ display: "block" }}
+                    disabledDate={(d) => d.isAfter(dayjs(), "day")}
+                  />
                 </div>
               </Space>
               <Typography.Text>Từ khóa (bắt buộc ≥1)</Typography.Text>
