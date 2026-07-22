@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from backend.auth.dependencies import get_current_user
 from backend.db import get_db
 from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Role, Source, User, UserRole
-from backend.routers import campaigns
+from backend.routers import campaigns, report_history
 
 
 @pytest.fixture
@@ -29,6 +29,7 @@ def admin_user(db_session):
 def app_client(db_session, admin_user):
     app = FastAPI()
     app.include_router(campaigns.router)
+    app.include_router(report_history.router)
     app.dependency_overrides[get_db] = lambda: db_session
     app.dependency_overrides[get_current_user] = lambda: admin_user
     return TestClient(app)
@@ -422,3 +423,19 @@ def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_
 
     assert response.status_code == 200
     mock_chord.assert_not_called()
+
+
+def test_list_all_reports_history_includes_campaign_name(app_client, admin_user, db_session):
+    campaign = Campaign(name="Chiến dịch ABC", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(ReportHistory(campaign_id=campaign.campaign_id, file_path="a.docx", format="docx", status="completed"))
+    db_session.commit()
+
+    response = app_client.get("/api/reports-history")
+
+    assert response.status_code == 200
+    rows = response.json()["history"]
+    assert len(rows) > 0
+    assert rows[0]["campaign_name"] == "Chiến dịch ABC"
+    assert rows[0]["format"] == "docx"

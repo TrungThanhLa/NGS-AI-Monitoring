@@ -7,28 +7,12 @@ import { authFetch } from "@/lib/api";
 
 type HistoryEntry = {
   report_id: string;
-  job_id: string;
-  file_path: string;
+  campaign_id: string;
+  campaign_name: string;
+  format: string;
+  status: string;
   created_at: string;
-  date_from: string;
-  date_to: string;
-  job_status: string;
-  source_names: string[];
 };
-
-// Tải file DOCX qua authFetch (thay vì <a href>) vì endpoint download giờ yêu cầu
-// Bearer token — thẻ <a> thường không gắn được header Authorization khi điều hướng.
-async function handleDownload(jobId: string) {
-  const res = await authFetch(`/api/reports/${jobId}/download`);
-  if (!res.ok) return;
-  const blob = await res.blob();
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `${jobId}.docx`;
-  link.click();
-  window.URL.revokeObjectURL(url);
-}
 
 export default function ReportsPage() {
   const navigate = useNavigate();
@@ -36,11 +20,8 @@ export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Lấy lịch sử báo cáo. Phân biệt rõ "lỗi gọi API" với "chưa có báo cáo nào" bằng state
-  // `error` riêng — nếu chỉ set history=[] khi lỗi, Table sẽ hiện nhầm emptyText mặc định
-  // dù thực chất backend đang lỗi/không kết nối được, đánh lừa người dùng.
   useEffect(() => {
-    authFetch("/api/reports/history")
+    authFetch("/api/reports-history")
       .then((res) => {
         if (!res.ok) throw new Error();
         return res.json();
@@ -58,7 +39,7 @@ export default function ReportsPage() {
         breadcrumbs={[{ title: "Tổng quan", href: "/" }, { title: "Báo cáo" }]}
         extra={
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate("/reports/create")}>
-            Tạo báo cáo
+            Tạo báo cáo nhanh
           </Button>
         }
       />
@@ -71,25 +52,18 @@ export default function ReportsPage() {
           dataSource={history}
           locale={{ emptyText: "Chưa có báo cáo nào." }}
           columns={[
+            { title: "Ngày tạo", dataIndex: "created_at", render: (v: string) => new Date(v).toLocaleString("vi-VN") },
             {
-              title: "Ngày tạo",
-              dataIndex: "created_at",
-              render: (v: string) => new Date(v).toLocaleString("vi-VN"),
+              title: "Chiến dịch",
+              render: (_v, e) => (
+                <a onClick={() => navigate(`/campaigns/${e.campaign_id}`)}>{e.campaign_name}</a>
+              ),
             },
-            { title: "Nguồn", render: (_v, e) => e.source_names.join(", ") || "-" },
-            { title: "Khoảng thời gian", render: (_v, e) => `${e.date_from} → ${e.date_to}` },
+            { title: "Định dạng", dataIndex: "format", render: (v: string) => <Tag>{v.toUpperCase()}</Tag> },
             {
               title: "Trạng thái",
-              dataIndex: "job_status",
-              render: (s: string) => <Tag color={s === "completed" ? "green" : "default"}>{s}</Tag>,
-            },
-            {
-              title: "Tải về",
-              render: (_v, e) => (
-                <Button type="link" onClick={() => handleDownload(e.job_id)}>
-                  Tải DOCX
-                </Button>
-              ),
+              dataIndex: "status",
+              render: (s: string) => <Tag color={s === "completed" ? "green" : s === "failed" ? "red" : "blue"}>{s}</Tag>,
             },
           ]}
           pagination={{ pageSize: 20 }}

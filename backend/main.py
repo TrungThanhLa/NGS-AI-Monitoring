@@ -12,6 +12,7 @@ from backend.routers import (
     campaigns,
     contents,
     keywords,
+    report_history,
     roles,
     sources,
     system_settings,
@@ -36,6 +37,7 @@ app.include_router(sources.router)
 app.include_router(keywords.router)
 app.include_router(campaigns.router)
 app.include_router(contents.router)
+app.include_router(report_history.router)
 app.include_router(system_settings.router)
 app.include_router(users.router)
 app.include_router(roles.router)
