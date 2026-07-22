@@ -1,15 +1,26 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
-from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, Source, User
+from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Source, User
+from backend.workers.campaign_tasks import generate_campaign_report
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
+
+_VALID_REPORT_FORMATS = {"docx", "json", "pdf", "xlsx", "csv"}
+_REPORT_MEDIA_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "json": "application/json",
+    "pdf": "application/pdf",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "csv": "text/csv",
+}
 
 _VALID_MODES = {"CONTINUOUS", "ONE_SHOT"}
 
@@ -323,6 +334,108 @@ def activate_campaign(
     db.commit()
 
     return _serialize_campaign(db, campaign)
+
+
+def _serialize_report(report: ReportHistory) -> dict:
+    return {
+        "report_id": str(report.report_id),
+        "campaign_id": str(report.campaign_id),
+        "format": report.format,
+        "status": report.status,
+        "error_log": report.error_log,
+        "file_path": report.file_path,
+        "created_at": report.created_at,
+    }
+
+
+def _get_campaign_report_or_404(db: Session, campaign_id: str, report_id: str) -> ReportHistory:
+    try:
+        report = db.get(ReportHistory, uuid.UUID(report_id))
+    except ValueError:
+        report = None
+    if report is None or str(report.campaign_id) != campaign_id:
+        raise HTTPException(status_code=404, detail="Không tìm thấy báo cáo")
+    return report
+
+
+class CreateCampaignReportRequest(BaseModel):
+    date_from: str
+    date_to: str
+    format: str = "docx"
+
+
+@router.post("/{campaign_id}/reports", status_code=202)
+def create_campaign_report(
+    campaign_id: str,
+    payload: CreateCampaignReportRequest,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_permission("report", "create")),
+):
+    campaign = _get_campaign_or_404(db, campaign_id)
+    if payload.format not in _VALID_REPORT_FORMATS:
+        raise HTTPException(status_code=400, detail=f"format phải là 1 trong {_VALID_REPORT_FORMATS}")
+
+    report = ReportHistory(
+        campaign_id=campaign.campaign_id,
+        file_path="",
+        format=payload.format,
+        status="pending",
+    )
+    db.add(report)
+    db.commit()
+
+    generate_campaign_report.delay(
+        str(report.report_id), str(campaign.campaign_id), payload.date_from, payload.date_to, payload.format
+    )
+
+    return {"report_id": str(report.report_id), "status": report.status}
+
+
+@router.get("/{campaign_id}/reports")
+def list_campaign_reports(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_permission("report", "view")),
+):
+    _get_campaign_or_404(db, campaign_id)
+    rows = (
+        db.query(ReportHistory)
+        .filter_by(campaign_id=uuid.UUID(campaign_id))
+        .order_by(ReportHistory.created_at.desc())
+        .all()
+    )
+    return {"reports": [_serialize_report(r) for r in rows]}
+
+
+@router.get("/{campaign_id}/reports/{report_id}")
+def get_campaign_report(
+    campaign_id: str,
+    report_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_permission("report", "view")),
+):
+    _get_campaign_or_404(db, campaign_id)
+    report = _get_campaign_report_or_404(db, campaign_id, report_id)
+    return _serialize_report(report)
+
+
+@router.get("/{campaign_id}/reports/{report_id}/download")
+def download_campaign_report(
+    campaign_id: str,
+    report_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_permission("report", "view")),
+):
+    _get_campaign_or_404(db, campaign_id)
+    report = _get_campaign_report_or_404(db, campaign_id, report_id)
+    if report.status != "completed":
+        raise HTTPException(status_code=400, detail="Báo cáo chưa hoàn thành")
+
+    return FileResponse(
+        report.file_path,
+        filename=f"{report_id}.{report.format}",
+        media_type=_REPORT_MEDIA_TYPES[report.format],
+    )
 
 
 @router.post("/{campaign_id}/pause")

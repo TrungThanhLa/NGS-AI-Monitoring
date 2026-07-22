@@ -1,5 +1,6 @@
 import uuid
 from datetime import date
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -7,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.auth.dependencies import get_current_user
 from backend.db import get_db
-from backend.models import Campaign, Keyword, Role, Source, User, UserRole
+from backend.models import Campaign, CampaignSource, Keyword, ReportHistory, Role, Source, User, UserRole
 from backend.routers import campaigns
 
 
@@ -307,3 +308,81 @@ def test_create_campaign_allows_duplicate_source_and_keyword_ids(app_client, adm
     body = response.json()
     assert body["source_ids"] == [str(source.source_id)]
     assert body["keyword_ids"] == [str(keyword.keyword_id)]
+
+
+def test_create_campaign_report_dispatches_celery_task_and_returns_pending(app_client, admin_user, source, keyword, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.generate_campaign_report") as mock_task:
+        response = app_client.post(
+            f"/api/campaigns/{campaign.campaign_id}/reports",
+            json={"date_from": "2026-06-01", "date_to": "2026-06-30", "format": "docx"},
+        )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["status"] == "pending"
+    mock_task.delay.assert_called_once()
+
+    report = db_session.get(ReportHistory, uuid.UUID(body["report_id"]))
+    assert report.campaign_id == campaign.campaign_id
+    assert report.format == "docx"
+    assert report.status == "pending"
+
+
+def test_create_campaign_report_rejects_invalid_format(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.post(
+        f"/api/campaigns/{campaign.campaign_id}/reports",
+        json={"date_from": "2026-06-01", "date_to": "2026-06-30", "format": "exe"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_get_campaign_report_status_returns_report_row(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.flush()
+    report = ReportHistory(campaign_id=campaign.campaign_id, file_path="", status="running", format="pdf")
+    db_session.add(report)
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/reports/{report.report_id}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "running"
+
+
+def test_list_campaign_reports_sorted_newest_first(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.flush()
+    # created_at đặt tay (không dùng server_default=func.now()) — NOW() của Postgres cố định
+    # trong suốt 1 transaction, mà db_session test chạy trong 1 transaction ngoài duy nhất
+    # (SAVEPOINT lồng, xem conftest.py), nên để mặc định sẽ làm r1/r2 trùng created_at, thứ
+    # tự không xác định — cùng pattern đã dùng ở test_reports_router.py::test_history_orders_by_created_at_desc
+    r1 = ReportHistory(
+        campaign_id=campaign.campaign_id, file_path="a", status="completed", format="docx", created_at=date(2026, 1, 1)
+    )
+    db_session.add(r1)
+    db_session.commit()
+    r2 = ReportHistory(
+        campaign_id=campaign.campaign_id, file_path="b", status="completed", format="pdf", created_at=date(2026, 1, 2)
+    )
+    db_session.add(r2)
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/reports")
+
+    ids = [r["report_id"] for r in response.json()["reports"]]
+    assert ids == [str(r2.report_id), str(r1.report_id)]
