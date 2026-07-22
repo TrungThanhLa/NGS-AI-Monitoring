@@ -12,7 +12,6 @@ from backend.routers import (
     campaigns,
     contents,
     keywords,
-    reports,
     roles,
     sources,
     system_settings,
@@ -33,7 +32,6 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(reports.router)
 app.include_router(sources.router)
 app.include_router(keywords.router)
 app.include_router(campaigns.router)

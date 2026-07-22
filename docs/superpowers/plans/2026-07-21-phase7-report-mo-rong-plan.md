@@ -1695,7 +1695,106 @@ git commit -m "fix: maybe_analyze_article chỉ chạy khi có Campaign CONTINUO
 - Delete: `backend/tests/test_report_job.py`
 - Modify: `backend/main.py`
 - Modify: `backend/workers/celery_app.py`
+- Modify: `backend/workers/continuous_crawl.py` (di chuyển `_get_candidates` — xem Step 0.5 mới)
+- Modify: `backend/tests/test_continuous_crawl.py` (thêm 2 test di chuyển từ `test_report_job.py`)
 - Modify: `backend/tests/test_aggregator.py`, `backend/tests/test_docx_generator.py` (bỏ import `Job` không còn dùng nếu còn sót)
+
+> **Sửa lại khi thực thi (2026-07-21, phát hiện thật lúc chạy Task 13):** implementer đầu tiên dừng đúng lúc (BLOCKED) khi thấy `continuous_crawl.py:discover_source_urls()` import trì hoãn `_get_candidates` TỪ `report_job.py` — đây là logic crawler thật đang chạy (ưu tiên `listing_pages` → `listing_url` → sitemap), không phải phần luồng Job. Xóa `report_job.py` như kế hoạch gốc sẽ làm hỏng continuous crawl. Bổ sung **Step 0.5** dưới đây để di chuyển hàm này sang `continuous_crawl.py` (nơi dùng duy nhất còn lại) TRƯỚC khi xóa `report_job.py` — đồng thời di chuyển 2 test đang test logic này qua `_crawl_sources` (`test_report_job.py`) sang test thẳng `_get_candidates` trong `test_continuous_crawl.py`, vì `test_continuous_crawl.py` hiện tại chỉ mock hàm này (không test logic thật), nên nếu không di chuyển sẽ mất coverage thật của nhánh chọn sitemap/listing.
+
+- [ ] **Step 0.5: Di chuyển `_get_candidates` từ `report_job.py` sang `continuous_crawl.py`, xóa cơ chế deferred-import (không còn cần vì lý do vòng lặp import gốc — `report_job.py → celery_app.py → continuous_crawl.py → report_job.py` — biến mất khi `report_job.py` bị xóa ở Step 2)**
+
+Trong `backend/workers/continuous_crawl.py`, thay khối hiện tại:
+
+```python
+def _get_candidates(source, date_from, date_to):
+    # Import trì hoãn tới lúc gọi ...
+    from backend.workers.report_job import _get_candidates as _impl
+
+    return _impl(source, date_from, date_to)
+```
+
+bằng chính nội dung thật của hàm (copy nguyên xi từ `report_job.py`, đổi comment cho đúng ngữ cảnh mới — không còn lý do vòng lặp import nữa):
+
+```python
+def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
+    # parsing_rules.listing_pages (nhiều trang chuyên mục, VD bocongan.gov.vn) luôn được ưu
+    # tiên cao nhất — kể cả khi nguồn vẫn còn khai sitemap_url (sitemap không đáng tin/đóng
+    # băng thì cấu hình listing_pages thay thế, không cần xoá sitemap_url khỏi DB).
+    if source.parsing_rules.get("listing_pages"):
+        return get_listing_urls(source, date_from, date_to)
+    # Sitemap được ưu tiên khi nguồn có khai sitemap_url; chỉ dùng listing-page 1 trang khi
+    # nguồn không có sitemap (VD tingia.gov.vn) — đúng thứ tự ưu tiên ở 06-crawler-strategy.md
+    if source.listing_url and not source.sitemap_url:
+        return get_listing_urls(source, date_from, date_to)
+    return get_article_urls(source, date_from, date_to)
+```
+
+Thêm 2 import còn thiếu vào đầu `continuous_crawl.py` (cạnh các import `backend.crawler.*` đã có):
+
+```python
+from backend.crawler.listing import get_listing_urls
+from backend.crawler.sitemap import get_article_urls
+```
+
+Sửa lại docstring của `discover_source_urls()` (dòng có "tái dùng nguyên xi `_get_candidates` của `report_job.py`") — bỏ cụm "của `report_job.py`" vì giờ hàm sống hẳn trong file này, không còn "tái dùng từ nơi khác" nữa.
+
+Di chuyển 2 test sau từ `backend/tests/test_report_job.py` sang cuối `backend/tests/test_continuous_crawl.py`, viết lại để gọi thẳng `_get_candidates(source, date_from, date_to)` (import từ `backend.workers.continuous_crawl`) thay vì gọi gián tiếp qua `_crawl_sources(db_session, job)` (hàm đó thuộc `report_job.py`, sắp bị xóa) — không cần tạo `Job`/`db_session` nữa vì `_get_candidates` không đụng DB:
+
+```python
+# backend/tests/test_continuous_crawl.py — thêm cuối file
+from unittest.mock import patch
+
+from backend.workers.continuous_crawl import _get_candidates
+
+
+def test_get_candidates_prefers_listing_pages_over_sitemap_when_both_configured(db_session):
+    source = Source(
+        name="Test Multi Listing",
+        domain=f"test-multi-listing-{uuid.uuid4()}.example",
+        group_name="Test",
+        sitemap_url="https://example.test/sitemap.xml",
+        listing_url=None,
+        parsing_rules={"listing_pages": ["https://example.test/chuyen-muc/a"]},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    with patch("backend.workers.continuous_crawl.get_listing_urls", return_value=([], [])) as mock_listing, patch(
+        "backend.workers.continuous_crawl.get_article_urls"
+    ) as mock_sitemap:
+        _get_candidates(source, date(2026, 6, 1), date(2026, 6, 30))
+
+    mock_listing.assert_called_once()
+    mock_sitemap.assert_not_called()
+
+
+def test_get_candidates_routes_sitemap_pages_source_through_get_article_urls(db_session):
+    # tingia.gov.vn: sitemap_url=NULL, listing_url=NULL, danh sách sub-sitemap curated nằm ở
+    # parsing_rules.sitemap_pages — không nhánh listing nào (listing_url hay listing_pages)
+    # khớp, nên phải rơi đúng vào get_article_urls() (không cần sửa _get_candidates()).
+    source = Source(
+        name="Test Sitemap Pages",
+        domain=f"test-sitemap-pages-{uuid.uuid4()}.example",
+        group_name="Test",
+        sitemap_url=None,
+        listing_url=None,
+        parsing_rules={"sitemap_pages": ["https://tingia.gov.vn/sitemap-pages/a.xml"]},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    with patch("backend.workers.continuous_crawl.get_listing_urls") as mock_listing, patch(
+        "backend.workers.continuous_crawl.get_article_urls", return_value=([], [])
+    ) as mock_sitemap:
+        _get_candidates(source, date(2026, 6, 1), date(2026, 6, 30))
+
+    mock_listing.assert_not_called()
+    mock_sitemap.assert_called_once()
+```
+
+(Đọc kỹ đầu `test_continuous_crawl.py` hiện có trước khi thêm — nếu `date`/`uuid`/`Source` đã import sẵn ở đầu file thì không import trùng; nếu 2 test trên monkeypatch `_get_candidates` ở module-level khác tên biến, giữ nguyên style đang dùng trong file thay vì lấy nguyên si khối trên.)
+
+Chạy `docker compose exec backend pytest backend/tests/test_continuous_crawl.py -v` xác nhận 2 test mới PASS trước khi sang Step 1.
 
 - [ ] **Step 1: Gỡ đăng ký router/worker trước khi xóa file (tránh ImportError khi chạy test giữa chừng)**
 

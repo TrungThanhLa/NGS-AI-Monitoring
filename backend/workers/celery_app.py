@@ -13,7 +13,6 @@ celery_app.conf.beat_schedule = {
     },
 }
 
-from backend.workers import report_job  # noqa: E402,F401  đăng ký task run_report_job
 from backend.workers import continuous_crawl  # noqa: E402,F401  đăng ký task crawl_task
 from backend.workers import scheduler  # noqa: E402,F401  đăng ký task check_due_sources
 from backend.workers import campaign_tasks  # noqa: E402,F401  đăng ký task generate_campaign_report

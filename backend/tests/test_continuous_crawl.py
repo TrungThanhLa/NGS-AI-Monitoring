@@ -425,3 +425,53 @@ def test_maybe_analyze_article_runs_when_continuous_campaign_matches(db_session,
     maybe_analyze_article(db_session, article)
 
     assert article.status == "analyzed"
+
+
+from unittest.mock import patch
+
+from backend.workers.continuous_crawl import _get_candidates
+
+
+def test_get_candidates_prefers_listing_pages_over_sitemap_when_both_configured(db_session):
+    source = Source(
+        name="Test Multi Listing",
+        domain=f"test-multi-listing-{uuid.uuid4()}.example",
+        group_name="Test",
+        sitemap_url="https://example.test/sitemap.xml",
+        listing_url=None,
+        parsing_rules={"listing_pages": ["https://example.test/chuyen-muc/a"]},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    with patch("backend.workers.continuous_crawl.get_listing_urls", return_value=([], [])) as mock_listing, patch(
+        "backend.workers.continuous_crawl.get_article_urls"
+    ) as mock_sitemap:
+        _get_candidates(source, date(2026, 6, 1), date(2026, 6, 30))
+
+    mock_listing.assert_called_once()
+    mock_sitemap.assert_not_called()
+
+
+def test_get_candidates_routes_sitemap_pages_source_through_get_article_urls(db_session):
+    # tingia.gov.vn: sitemap_url=NULL, listing_url=NULL, danh sách sub-sitemap curated nằm ở
+    # parsing_rules.sitemap_pages — không nhánh listing nào (listing_url hay listing_pages)
+    # khớp, nên phải rơi đúng vào get_article_urls() (không cần sửa _get_candidates()).
+    source = Source(
+        name="Test Sitemap Pages",
+        domain=f"test-sitemap-pages-{uuid.uuid4()}.example",
+        group_name="Test",
+        sitemap_url=None,
+        listing_url=None,
+        parsing_rules={"sitemap_pages": ["https://tingia.gov.vn/sitemap-pages/a.xml"]},
+    )
+    db_session.add(source)
+    db_session.flush()
+
+    with patch("backend.workers.continuous_crawl.get_listing_urls") as mock_listing, patch(
+        "backend.workers.continuous_crawl.get_article_urls", return_value=([], [])
+    ) as mock_sitemap:
+        _get_candidates(source, date(2026, 6, 1), date(2026, 6, 30))
+
+    mock_listing.assert_not_called()
+    mock_sitemap.assert_called_once()

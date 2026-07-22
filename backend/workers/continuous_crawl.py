@@ -7,6 +7,8 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.crawler.article import compute_url_hash
 from backend.crawler.crawl4ai_client import fetch_article_dispatch
+from backend.crawler.listing import get_listing_urls
+from backend.crawler.sitemap import get_article_urls
 from backend.models import (
     Article,
     Campaign,
@@ -30,25 +32,24 @@ from backend.models import (
 _DISCOVER_LOOKBACK_DAYS = 30
 
 
-def _get_candidates(source, date_from, date_to):
-    # Import trì hoãn tới lúc gọi (không import ở đầu file) — report_job.py import
-    # ngược lại celery_app (đăng ký cả continuous_crawl module này), nên nếu
-    # report_job.py là entrypoint đầu tiên của tiến trình (VD `pytest
-    # tests/test_report_job.py` chạy riêng lẻ), import ở top-level module sẽ tạo
-    # vòng lặp: report_job → celery_app → continuous_crawl → report_job (lúc này
-    # report_job vẫn đang khởi tạo dở, chưa định nghĩa xong _get_candidates thật).
-    # Trì hoãn import xuống đây phá vòng lặp, đồng thời vẫn giữ được tên
-    # continuous_crawl._get_candidates để test monkeypatch như cũ.
-    from backend.workers.report_job import _get_candidates as _impl
-
-    return _impl(source, date_from, date_to)
+def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
+    # parsing_rules.listing_pages (nhiều trang chuyên mục, VD bocongan.gov.vn) luôn được ưu
+    # tiên cao nhất — kể cả khi nguồn vẫn còn khai sitemap_url (sitemap không đáng tin/đóng
+    # băng thì cấu hình listing_pages thay thế, không cần xoá sitemap_url khỏi DB).
+    if source.parsing_rules.get("listing_pages"):
+        return get_listing_urls(source, date_from, date_to)
+    # Sitemap được ưu tiên khi nguồn có khai sitemap_url; chỉ dùng listing-page 1 trang khi
+    # nguồn không có sitemap (VD tingia.gov.vn) — đúng thứ tự ưu tiên ở 06-crawler-strategy.md
+    if source.listing_url and not source.sitemap_url:
+        return get_listing_urls(source, date_from, date_to)
+    return get_article_urls(source, date_from, date_to)
 
 
 def discover_source_urls(db, source: Source, today: date | None = None) -> int:
-    """Giai đoạn 1 (Discover): tìm URL ứng viên của nguồn (tái dùng nguyên xi
-    _get_candidates của report_job.py — không đổi logic ưu tiên sitemap/listing),
-    ghi vào crawl_queue. Trả về số URL MỚI vừa ghi (không tính URL đã có từ chu kỳ
-    trước — ON CONFLICT DO NOTHING không ghi đè trạng thái cũ)."""
+    """Giai đoạn 1 (Discover): tìm URL ứng viên của nguồn (dùng _get_candidates ở trên
+    — không đổi logic ưu tiên sitemap/listing), ghi vào crawl_queue. Trả về số URL MỚI
+    vừa ghi (không tính URL đã có từ chu kỳ trước — ON CONFLICT DO NOTHING không ghi
+    đè trạng thái cũ)."""
     today = today or date.today()
     date_from = today - timedelta(days=_DISCOVER_LOOKBACK_DAYS)
     candidates, _failed_locs = _get_candidates(source, date_from, today)
