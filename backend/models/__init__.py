@@ -3,6 +3,7 @@ from backend.models.articles import Article
 from backend.models.audit_log import AuditLog
 from backend.models.campaign_article_keywords import CampaignArticleKeyword
 from backend.models.campaign_articles import CampaignArticle
+from backend.models.campaign_crawl_progress import CampaignCrawlProgress
 from backend.models.campaign_keywords import CampaignKeyword
 from backend.models.campaign_sources import CampaignSource
 from backend.models.campaigns import Campaign
@@ -36,4 +37,5 @@ __all__ = [
     "SystemSetting",
     "CampaignArticle",
     "CampaignArticleKeyword",
+    "CampaignCrawlProgress",
 ]

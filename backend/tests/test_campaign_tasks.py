@@ -163,3 +163,19 @@ def test_mark_crawl_done_no_op_if_campaign_not_found(db_session):
 
     nonexistent_id = str(uuid.uuid4())
     _mark_crawl_done(db_session, nonexistent_id)  # Should not raise
+
+
+from backend.models import CampaignCrawlProgress
+
+
+def test_campaign_crawl_progress_model_roundtrip(db_session):
+    campaign = _make_campaign(db_session)
+    source = _make_source(db_session)
+    db_session.add(CampaignCrawlProgress(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    row = db_session.query(CampaignCrawlProgress).filter_by(campaign_id=campaign.campaign_id).one()
+    assert row.source_id == source.source_id
+    assert row.total_urls is None
+    assert row.done_urls == 0
+    assert row.status == "pending"
