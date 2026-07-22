@@ -120,3 +120,26 @@ def test_generate_campaign_report_marks_failed_on_exception(db_session, tmp_path
     db_session.refresh(report)
     assert report.status == "failed"
     assert "boom" in report.error_log
+
+
+def test_mark_crawl_done_sets_campaign_completed(db_session):
+    """Callback của chord — chạy SAU KHI toàn bộ crawl_task con hoàn thành.
+    Chỉ đánh dấu COMPLETED — KHÔNG chạm AI/report."""
+    from backend.workers.campaign_tasks import _mark_crawl_done
+
+    campaign = _make_campaign(db_session)
+    campaign.status = "ACTIVE"
+    db_session.commit()
+
+    _mark_crawl_done(db_session, str(campaign.campaign_id))
+
+    db_session.refresh(campaign)
+    assert campaign.status == "COMPLETED"
+
+
+def test_mark_crawl_done_no_op_if_campaign_not_found(db_session):
+    """If campaign không tồn tại, hàm chỉ return ngay — không raise exception."""
+    from backend.workers.campaign_tasks import _mark_crawl_done
+
+    nonexistent_id = str(uuid.uuid4())
+    _mark_crawl_done(db_session, nonexistent_id)  # Should not raise

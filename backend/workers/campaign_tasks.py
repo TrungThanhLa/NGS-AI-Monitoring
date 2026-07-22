@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.ai.ollama_client import analyze_article
 from backend.db import SessionLocal
-from backend.models import Article, ArticleAnalysis, CampaignArticle, ReportHistory
+from backend.models import Article, ArticleAnalysis, Campaign, CampaignArticle, ReportHistory
 from backend.report.aggregator import aggregate_basic
 from backend.report.csv_generator import generate_csv
 from backend.report.docx_generator import export_json, generate_docx
@@ -139,5 +139,34 @@ def generate_campaign_report(report_id: str, campaign_id: str, date_from: str, d
     db = SessionLocal()
     try:
         _generate_campaign_report(db, report_id, campaign_id, date_from, date_to, format)
+    finally:
+        db.close()
+
+
+def _mark_crawl_done(db: Session, campaign_id: str) -> None:
+    """Logic thật của mark_crawl_done — tách riêng khỏi việc mở/đóng session để
+    test gọi thẳng với fixture db_session (không cần patch SessionLocal).
+    Chỉ đánh dấu Campaign status = COMPLETED — KHÔNG chạm AI/report."""
+    campaign = db.get(Campaign, uuid.UUID(campaign_id))
+    if campaign is None:
+        return
+    campaign.status = "COMPLETED"
+    db.commit()
+
+
+@celery_app.task(name="campaign_tasks.mark_crawl_done")
+def mark_crawl_done(results, campaign_id: str) -> None:
+    """Callback của Celery chord — chạy SAU KHI toàn bộ crawl_task con (1 task/Source)
+    trong group đã xong (kể cả khi 1 vài task con lỗi — crawl_task tự bắt lỗi nội bộ,
+    không propagate exception ra ngoài group, xem Task 10).
+
+    `results` là kết quả trả về của các task con trong chord, không dùng tới nhưng bắt buộc
+    phải nhận theo đúng chữ ký callback của Celery chord.
+
+    Chỉ đánh dấu COMPLETED — KHÔNG chạm AI/report (đó là hành động thủ công riêng,
+    xem Task 7/8)."""
+    db = SessionLocal()
+    try:
+        _mark_crawl_done(db, campaign_id)
     finally:
         db.close()
