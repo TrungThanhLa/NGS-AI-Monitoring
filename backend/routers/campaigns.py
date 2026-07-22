@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 import uuid
 
 from celery import chord
@@ -10,7 +10,19 @@ from sqlalchemy.orm import Session
 from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
-from backend.models import Campaign, CampaignCrawlProgress, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Source, User
+from backend.models import (
+    Article,
+    Campaign,
+    CampaignArticle,
+    CampaignCrawlProgress,
+    CampaignKeyword,
+    CampaignSource,
+    CrawlQueue,
+    Keyword,
+    ReportHistory,
+    Source,
+    User,
+)
 from backend.workers.campaign_tasks import crawl_campaign_source_once, generate_campaign_report, mark_crawl_done
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
@@ -515,3 +527,72 @@ def pause_campaign(
     db.commit()
 
     return _serialize_campaign(db, campaign)
+
+
+@router.get("/{campaign_id}/crawl-progress")
+def get_campaign_crawl_progress(
+    campaign_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("campaign", "view")),
+):
+    campaign = _get_campaign_or_404(db, campaign_id)
+    watched_sources = (
+        db.query(Source)
+        .join(CampaignSource, CampaignSource.source_id == Source.source_id)
+        .filter(CampaignSource.campaign_id == campaign.campaign_id)
+        .all()
+    )
+
+    if campaign.mode == "ONE_SHOT":
+        progress_by_source = {
+            p.source_id: p
+            for p in db.query(CampaignCrawlProgress).filter_by(campaign_id=campaign.campaign_id).all()
+        }
+        sources = []
+        total_sum = 0
+        done_sum = 0
+        for s in watched_sources:
+            p = progress_by_source.get(s.source_id)
+            total_urls = p.total_urls if p else None
+            done_urls = p.done_urls if p else 0
+            status = p.status if p else "pending"
+            sources.append(
+                {
+                    "source_id": str(s.source_id),
+                    "source_name": s.name,
+                    "total_urls": total_urls,
+                    "done_urls": done_urls,
+                    "status": status,
+                }
+            )
+            if total_urls:
+                total_sum += total_urls
+            done_sum += done_urls
+        overall_percent = round(100 * done_sum / total_sum, 1) if total_sum > 0 else 0.0
+        return {"mode": "ONE_SHOT", "sources": sources, "overall_percent": overall_percent}
+
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    sources = []
+    for s in watched_sources:
+        pending_count = db.query(CrawlQueue).filter_by(source_id=s.source_id, status="pending").count()
+        matched_last_24h = (
+            db.query(CampaignArticle)
+            .join(Article, Article.article_id == CampaignArticle.article_id)
+            .filter(
+                CampaignArticle.campaign_id == campaign.campaign_id,
+                Article.source_id == s.source_id,
+                CampaignArticle.matched_at >= since,
+            )
+            .count()
+        )
+        sources.append(
+            {
+                "source_id": str(s.source_id),
+                "source_name": s.name,
+                "last_crawled_at": s.last_crawled_at,
+                "source_status": s.status,
+                "pending_count": pending_count,
+                "matched_last_24h": matched_last_24h,
+            }
+        )
+    return {"mode": "CONTINUOUS", "sources": sources}

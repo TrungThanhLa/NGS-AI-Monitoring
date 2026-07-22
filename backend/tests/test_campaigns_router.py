@@ -9,10 +9,13 @@ from fastapi.testclient import TestClient
 from backend.auth.dependencies import get_current_user
 from backend.db import get_db
 from backend.models import (
+    Article,
     Campaign,
+    CampaignArticle,
     CampaignCrawlProgress,
     CampaignKeyword,
     CampaignSource,
+    CrawlQueue,
     Keyword,
     ReportHistory,
     Role,
@@ -539,3 +542,69 @@ def test_activate_one_shot_campaign_without_end_date_rejected(app_client, admin_
     response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
 
     assert response.status_code == 400
+
+
+def test_crawl_progress_one_shot_returns_percent_from_progress_rows(app_client, admin_user, source, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="ACTIVE",
+        owner_id=admin_user.user_id, mode="ONE_SHOT",
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignCrawlProgress(
+        campaign_id=campaign.campaign_id, source_id=source.source_id,
+        total_urls=10, done_urls=4, status="fetching",
+    ))
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "ONE_SHOT"
+    assert body["overall_percent"] == 40.0
+    assert body["sources"][0]["total_urls"] == 10
+    assert body["sources"][0]["done_urls"] == 4
+    assert body["sources"][0]["status"] == "fetching"
+
+
+def test_crawl_progress_one_shot_source_without_progress_row_shows_pending(app_client, admin_user, source, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="ACTIVE",
+        owner_id=admin_user.user_id, mode="ONE_SHOT",
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+
+    body = response.json()
+    assert body["sources"][0]["status"] == "pending"
+    assert body["sources"][0]["total_urls"] is None
+    assert body["overall_percent"] == 0.0
+
+
+def test_crawl_progress_continuous_returns_source_activity(app_client, admin_user, source, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS",
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CrawlQueue(source_id=source.source_id, url="https://x.example/p", url_hash="hp", status="pending"))
+    article = Article(source_id=source.source_id, url="https://x.example/a", url_hash="ha")
+    db_session.add(article)
+    db_session.flush()
+    db_session.add(CampaignArticle(campaign_id=campaign.campaign_id, article_id=article.article_id))
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["mode"] == "CONTINUOUS"
+    assert body["sources"][0]["pending_count"] == 1
+    assert body["sources"][0]["matched_last_24h"] == 1
