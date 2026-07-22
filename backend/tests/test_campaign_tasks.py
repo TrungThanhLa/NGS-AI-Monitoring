@@ -179,3 +179,133 @@ def test_campaign_crawl_progress_model_roundtrip(db_session):
     assert row.total_urls is None
     assert row.done_urls == 0
     assert row.status == "pending"
+
+
+from backend.crawler.article import compute_url_hash
+from backend.models import CampaignArticle, CampaignKeyword, CampaignSource, CrawlQueue, Keyword
+from backend.workers.campaign_tasks import _crawl_campaign_source_once
+
+
+def _make_campaign_with_source_and_keyword(db_session, keyword_text="lừa đảo"):
+    campaign = _make_campaign(db_session)
+    source = _make_source(db_session)
+    kw = Keyword(keyword=keyword_text)
+    db_session.add(kw)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=kw.keyword_id))
+    db_session.commit()
+    return campaign, source
+
+
+def test_crawl_campaign_source_once_fetches_new_candidates_and_tracks_progress(db_session, monkeypatch):
+    campaign, source = _make_campaign_with_source_and_keyword(db_session)
+    monkeypatch.setenv("CRAWLER_DELAY_SECONDS", "0")
+    monkeypatch.setattr(
+        "backend.workers.continuous_crawl._get_candidates",
+        lambda src, date_from, date_to: ([{"url": "https://x.example/bai-1"}], []),
+    )
+    monkeypatch.setattr(
+        "backend.workers.campaign_tasks.fetch_article_dispatch",
+        lambda url, rules: {
+            "url": url, "url_hash": "hash-bai-1", "title": "Cảnh báo lừa đảo", "content_raw": "Nội dung",
+            "author": None, "published_at": None, "crawl_duration_seconds": 0.1,
+        },
+    )
+
+    _crawl_campaign_source_once(db_session, str(campaign.campaign_id), str(source.source_id), "2026-06-01", "2026-06-05")
+
+    article = db_session.query(Article).filter_by(source_id=source.source_id, url_hash="hash-bai-1").one()
+    assert article.title == "Cảnh báo lừa đảo"
+    ca = db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id, article_id=article.article_id).one()
+    assert ca is not None
+
+    progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert progress.total_urls == 1
+    assert progress.done_urls == 1
+    assert progress.status == "done"
+
+
+def test_crawl_campaign_source_once_reuses_existing_article_without_refetching(db_session, monkeypatch):
+    campaign, source = _make_campaign_with_source_and_keyword(db_session)
+    # url_hash phải khớp compute_url_hash(url) thật — production luôn ghi Article.url_hash
+    # bằng compute_url_hash (xem _get_candidates → fetch_article_dispatch → compute_url_hash
+    # trong crawler/article.py), lookup "tái sử dụng" trong _crawl_campaign_source_once
+    # cũng tra bằng compute_url_hash(url), không phải chuỗi tùy ý.
+    existing = Article(
+        source_id=source.source_id, url="https://x.example/bai-cu",
+        url_hash=compute_url_hash("https://x.example/bai-cu"),
+        title="Cảnh báo lừa đảo cũ", content_raw="Nội dung cũ", status="analyzed",
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    monkeypatch.setenv("CRAWLER_DELAY_SECONDS", "0")
+    monkeypatch.setattr(
+        "backend.workers.continuous_crawl._get_candidates",
+        lambda src, date_from, date_to: ([{"url": "https://x.example/bai-cu"}], []),
+    )
+
+    def _fail_if_called(url, rules):
+        raise AssertionError("Không được gọi fetch_article_dispatch cho URL đã có Article")
+
+    monkeypatch.setattr("backend.workers.campaign_tasks.fetch_article_dispatch", _fail_if_called)
+
+    _crawl_campaign_source_once(db_session, str(campaign.campaign_id), str(source.source_id), "2026-06-01", "2026-06-05")
+
+    ca = db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id, article_id=existing.article_id).one()
+    assert ca is not None
+    progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert progress.done_urls == 1
+    assert progress.status == "done"
+
+
+def test_crawl_campaign_source_once_handles_reactivation_without_duplicate_match(db_session, monkeypatch):
+    # Kích hoạt lại Campaign (crawl lần 2 cho cùng URL đã match từ lần 1) không được vỡ
+    # IntegrityError ở campaign_articles — dựa vào guard idempotent đã thêm ở Task 3
+    campaign, source = _make_campaign_with_source_and_keyword(db_session)
+    monkeypatch.setenv("CRAWLER_DELAY_SECONDS", "0")
+    monkeypatch.setattr(
+        "backend.workers.continuous_crawl._get_candidates",
+        lambda src, date_from, date_to: ([{"url": "https://x.example/bai-2"}], []),
+    )
+    # url_hash trả về phải khớp compute_url_hash(url) thật — như production
+    # (fetch_article_dispatch tự tính url_hash) — để lượt crawl thứ 2 tìm lại đúng
+    # Article đã lưu ở lượt 1 (nhánh tái sử dụng), thay vì tạo trùng/vỡ constraint.
+    monkeypatch.setattr(
+        "backend.workers.campaign_tasks.fetch_article_dispatch",
+        lambda url, rules: {
+            "url": url, "url_hash": compute_url_hash(url), "title": "Lừa đảo", "content_raw": "Nội dung",
+            "author": None, "published_at": None, "crawl_duration_seconds": 0.1,
+        },
+    )
+
+    _crawl_campaign_source_once(db_session, str(campaign.campaign_id), str(source.source_id), "2026-06-01", "2026-06-05")
+    _crawl_campaign_source_once(db_session, str(campaign.campaign_id), str(source.source_id), "2026-06-01", "2026-06-05")
+
+    article = db_session.query(Article).filter_by(
+        source_id=source.source_id, url_hash=compute_url_hash("https://x.example/bai-2")
+    ).one()
+    rows = db_session.query(CampaignArticle).filter_by(campaign_id=campaign.campaign_id, article_id=article.article_id).all()
+    assert len(rows) == 1
+
+
+def test_crawl_campaign_source_once_sets_error_status_on_discover_failure(db_session, monkeypatch):
+    campaign, source = _make_campaign_with_source_and_keyword(db_session)
+    monkeypatch.setenv("CRAWLER_DELAY_SECONDS", "0")
+
+    def _raise(src, date_from, date_to):
+        raise RuntimeError("lỗi mạng giả lập")
+
+    monkeypatch.setattr("backend.workers.continuous_crawl._get_candidates", _raise)
+
+    _crawl_campaign_source_once(db_session, str(campaign.campaign_id), str(source.source_id), "2026-06-01", "2026-06-05")
+
+    progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert progress.status == "error"

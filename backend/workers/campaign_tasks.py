@@ -1,21 +1,34 @@
 import asyncio
 import logging
 import os
+import time
 import uuid
 from datetime import date, timedelta
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.ai.ollama_client import analyze_article
+from backend.crawler.article import compute_url_hash
+from backend.crawler.crawl4ai_client import fetch_article_dispatch
 from backend.db import SessionLocal
-from backend.models import Article, ArticleAnalysis, Campaign, CampaignArticle, ReportHistory
+from backend.models import (
+    Article,
+    ArticleAnalysis,
+    Campaign,
+    CampaignArticle,
+    CampaignCrawlProgress,
+    ReportHistory,
+    Source,
+)
 from backend.report.aggregator import aggregate_basic
 from backend.report.csv_generator import generate_csv
 from backend.report.docx_generator import export_json, generate_docx
 from backend.report.excel_generator import generate_excel
 from backend.report.pdf_generator import generate_pdf
+from backend.workers import continuous_crawl
 from backend.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -174,5 +187,101 @@ def mark_crawl_done(results, campaign_id: str) -> None:
     db = SessionLocal()
     try:
         _mark_crawl_done(db, campaign_id)
+    finally:
+        db.close()
+
+
+def _crawl_campaign_source_once(db: Session, campaign_id: str, source_id: str, date_from: str, date_to: str) -> None:
+    """Logic thật của crawl_campaign_source_once — tách khỏi mở/đóng session để test gọi
+    thẳng với fixture db_session. Đường crawl RIÊNG cho ONE_SHOT (khác continuous_crawl.
+    crawl_task dùng cho CONTINUOUS): Discover đúng [date_from, date_to] của Campaign
+    (không qua cửa sổ 30 ngày cố định), với mỗi URL — đã có Article thì tái sử dụng
+    (không fetch lại), chưa có thì fetch mới. Không tự phục hồi nếu crash giữa chừng
+    (khác CONTINUOUS) — kích hoạt lại Campaign là đủ, nhờ cơ chế tái sử dụng ở trên nên
+    crawl lại rẻ. Bọc try/except toàn bộ để không phá chord (xem crawl_task."""
+    campaign_uuid = uuid.UUID(campaign_id)
+    source_uuid = uuid.UUID(source_id)
+
+    progress = db.get(CampaignCrawlProgress, (campaign_uuid, source_uuid))
+    if progress is None:
+        progress = CampaignCrawlProgress(campaign_id=campaign_uuid, source_id=source_uuid)
+        db.add(progress)
+
+    try:
+        source = db.get(Source, source_uuid)
+        if source is None:
+            return
+
+        progress.status = "discovering"
+        progress.done_urls = 0
+        db.commit()
+
+        parsed_date_from = date.fromisoformat(date_from)
+        parsed_date_to = date.fromisoformat(date_to)
+        candidates, _failed = continuous_crawl._get_candidates(source, parsed_date_from, parsed_date_to)
+
+        progress.total_urls = len(candidates)
+        progress.status = "fetching"
+        db.commit()
+
+        delay_seconds = float(os.environ.get("CRAWLER_DELAY_SECONDS", "1.5"))
+
+        for candidate in candidates:
+            url = candidate["url"]
+            url_hash = compute_url_hash(url)
+            article = db.query(Article).filter_by(source_id=source_uuid, url_hash=url_hash).first()
+
+            if article is None:
+                try:
+                    parsed = fetch_article_dispatch(url, source.parsing_rules)
+                except Exception:
+                    parsed = None
+                time.sleep(delay_seconds)
+
+                if parsed is not None:
+                    article = Article(
+                        source_id=source_uuid,
+                        url=parsed["url"],
+                        url_hash=parsed["url_hash"],
+                        title=parsed["title"],
+                        content_raw=parsed["content_raw"],
+                        author=parsed["author"],
+                        published_at=parsed.get("published_at"),
+                        crawl_duration_seconds=parsed.get("crawl_duration_seconds"),
+                    )
+                    db.add(article)
+                    try:
+                        db.commit()
+                    except IntegrityError:
+                        # Race hiếm: tiến trình khác (VD continuous_crawl.crawl_task cùng
+                        # Source) đã insert đúng URL này trước — rollback, đọc lại bản đã có
+                        db.rollback()
+                        article = db.query(Article).filter_by(source_id=source_uuid, url_hash=url_hash).first()
+
+            if article is not None:
+                continuous_crawl.match_campaigns_for_article(db, article)
+
+            progress.done_urls += 1
+            db.commit()
+
+        progress.status = "done"
+        db.commit()
+    except Exception:
+        logger.exception(
+            "crawl_campaign_source_once thất bại cho campaign_id=%s source_id=%s", campaign_id, source_id
+        )
+        db.rollback()
+        progress.status = "error"
+        db.commit()
+
+
+@celery_app.task(name="campaign_tasks.crawl_campaign_source_once")
+def crawl_campaign_source_once(campaign_id: str, source_id: str, date_from: str, date_to: str) -> None:
+    """Thành viên của chord (mode=ONE_SHOT, xem routers/campaigns.py::activate_campaign) —
+    1 task/Source. KHÔNG được raise ra ngoài (xử lý bên trong _crawl_campaign_source_once)
+    — nếu raise, Celery không chạy callback mark_crawl_done, Campaign kẹt ACTIVE mãi."""
+    db = SessionLocal()
+    try:
+        _crawl_campaign_source_once(db, campaign_id, source_id, date_from, date_to)
     finally:
         db.close()
