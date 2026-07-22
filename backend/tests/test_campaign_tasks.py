@@ -309,3 +309,42 @@ def test_crawl_campaign_source_once_sets_error_status_on_discover_failure(db_ses
         campaign_id=campaign.campaign_id, source_id=source.source_id
     ).one()
     assert progress.status == "error"
+
+
+def test_crawl_campaign_source_once_does_not_raise_on_malformed_campaign_id(db_session):
+    # Regression test — fix round 1, finding #1: trước khi sửa, uuid.UUID(campaign_id) chạy
+    # NGOÀI try/except nên raise ValueError thoát thẳng ra khỏi hàm, phá chord callback
+    # mark_crawl_done (Campaign kẹt ACTIVE mãi). Sau khi sửa, toàn bộ parsing nằm trong
+    # try/except nên hàm phải trả về bình thường (không raise) dù campaign_id không hợp lệ.
+    _crawl_campaign_source_once(db_session, "khong-phai-uuid", str(uuid.uuid4()), "2026-06-01", "2026-06-05")
+
+
+def test_crawl_campaign_source_once_marks_progress_error_when_source_missing(db_session, monkeypatch):
+    # Fix round 1, finding #2 (minor): trước khi sửa, source is None → return ngay, dòng
+    # CampaignCrawlProgress vừa db.add() không được commit → mất trắng, không có bản ghi
+    # nào. Sau khi sửa, phải có 1 dòng CampaignCrawlProgress với status="error".
+    #
+    # Lưu ý: campaign_crawl_progress.source_id có FK NOT NULL tới sources — không thể tạo
+    # được 1 dòng progress trỏ tới source_id hoàn toàn không tồn tại trong bảng sources (sẽ
+    # tự vỡ IntegrityError ở chính bước ghi "error", không phản ánh đúng tình huống thật:
+    # source đã có ở lúc activate Campaign nhưng biến mất đúng lúc task này chạy). Dùng thật
+    # 1 Source có sẵn (thỏa FK) và chỉ giả lập lookup "không tìm thấy" qua monkeypatch
+    # db.get, mô phỏng đúng nhánh code `source is None` mà không phá ràng buộc DB.
+    campaign = _make_campaign(db_session)
+    source = _make_source(db_session)
+
+    original_get = db_session.get
+
+    def _get_none_for_source(model, ident, *args, **kwargs):
+        if model is Source:
+            return None
+        return original_get(model, ident, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", _get_none_for_source)
+
+    _crawl_campaign_source_once(db_session, str(campaign.campaign_id), str(source.source_id), "2026-06-01", "2026-06-05")
+
+    progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert progress.status == "error"

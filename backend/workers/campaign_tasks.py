@@ -199,17 +199,19 @@ def _crawl_campaign_source_once(db: Session, campaign_id: str, source_id: str, d
     (không fetch lại), chưa có thì fetch mới. Không tự phục hồi nếu crash giữa chừng
     (khác CONTINUOUS) — kích hoạt lại Campaign là đủ, nhờ cơ chế tái sử dụng ở trên nên
     crawl lại rẻ. Bọc try/except toàn bộ để không phá chord (xem crawl_task."""
-    campaign_uuid = uuid.UUID(campaign_id)
-    source_uuid = uuid.UUID(source_id)
-
-    progress = db.get(CampaignCrawlProgress, (campaign_uuid, source_uuid))
-    if progress is None:
-        progress = CampaignCrawlProgress(campaign_id=campaign_uuid, source_id=source_uuid)
-        db.add(progress)
-
     try:
+        campaign_uuid = uuid.UUID(campaign_id)
+        source_uuid = uuid.UUID(source_id)
+
+        progress = db.get(CampaignCrawlProgress, (campaign_uuid, source_uuid))
+        if progress is None:
+            progress = CampaignCrawlProgress(campaign_id=campaign_uuid, source_id=source_uuid)
+            db.add(progress)
+
         source = db.get(Source, source_uuid)
         if source is None:
+            progress.status = "error"
+            db.commit()
             return
 
         progress.status = "discovering"
@@ -270,9 +272,18 @@ def _crawl_campaign_source_once(db: Session, campaign_id: str, source_id: str, d
         logger.exception(
             "crawl_campaign_source_once thất bại cho campaign_id=%s source_id=%s", campaign_id, source_id
         )
-        db.rollback()
-        progress.status = "error"
-        db.commit()
+        try:
+            db.rollback()
+            if "progress" in locals() and progress is not None:
+                progress.status = "error"
+                db.commit()
+        except Exception:
+            logger.exception(
+                "crawl_campaign_source_once: rollback/ghi trạng thái error cũng thất bại cho "
+                "campaign_id=%s source_id=%s",
+                campaign_id,
+                source_id,
+            )
 
 
 @celery_app.task(name="campaign_tasks.crawl_campaign_source_once")
@@ -282,6 +293,17 @@ def crawl_campaign_source_once(campaign_id: str, source_id: str, date_from: str,
     — nếu raise, Celery không chạy callback mark_crawl_done, Campaign kẹt ACTIVE mãi."""
     db = SessionLocal()
     try:
-        _crawl_campaign_source_once(db, campaign_id, source_id, date_from, date_to)
+        try:
+            _crawl_campaign_source_once(db, campaign_id, source_id, date_from, date_to)
+        except Exception:
+            # Lớp phòng thủ thứ 2 — chỉ log, KHÔNG raise: nếu chính except block bên trong
+            # _crawl_campaign_source_once cũng lỗi (VD DB connection đã chết thật), vẫn không
+            # được để exception thoát ra khỏi task này, phá chord callback mark_crawl_done.
+            logger.exception(
+                "crawl_campaign_source_once: exception thoát khỏi _crawl_campaign_source_once "
+                "cho campaign_id=%s source_id=%s",
+                campaign_id,
+                source_id,
+            )
     finally:
         db.close()
