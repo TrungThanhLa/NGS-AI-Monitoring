@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
-import { Button, Card, DatePicker, Space, Table, Tag, Alert, Progress, Popconfirm, Typography } from "antd";
+import { Button, Card, DatePicker, Space, Tag, Alert, Select, Typography } from "antd";
 import dayjs, { Dayjs } from "dayjs";
 import { useNavigate } from "react-router-dom";
 import PageHeader from "@/components/common/PageHeader";
 import PermissionGuard from "@/components/common/PermissionGuard";
 import { authFetch } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import SourceSidebar, { SourceItem } from "./SourceSidebar";
 import SummaryCard from "./SummaryCard";
 
-const JOB_ID_STORAGE_KEY = "ngs_monitor_job_id";
+const CAMPAIGN_ID_STORAGE_KEY = "ngs_monitor_one_shot_campaign_id";
 
 const DATE_PRESETS = [
   { label: "Hôm nay", days: 0 },
@@ -22,58 +23,40 @@ function todayMinus(days: number): Dayjs {
   return dayjs().subtract(days, "day");
 }
 
-type JobStatus = {
-  job_id: string;
+type CampaignStatus = {
+  campaign_id: string;
   status: string;
-  progress: { crawled: number; analyzed: number; total_estimated: number };
-  error_log?: string;
 };
 
-type CrawledArticle = {
-  title: string | null;
-  url: string;
-  status: string;
-  source_name: string | null;
-  crawl_duration_seconds: number | null;
-  analysis_duration_seconds: number | null;
-  total_duration_seconds: number | null;
-};
-
-function formatSeconds(value: number | null): string {
-  return value === null ? "-" : `${value.toFixed(1)}s`;
-}
+type KeywordOption = { keyword_id: string; keyword: string };
 
 const statusColor: Record<string, string> = {
-  pending: "default",
-  running: "blue",
-  completed: "green",
-  failed: "red",
-  cancelled: "default",
+  DRAFT: "default",
+  ACTIVE: "blue",
+  COMPLETED: "green",
+  ARCHIVED: "default",
 };
 
 export default function ReportCreate() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [dateFrom, setDateFrom] = useState<Dayjs>(todayMinus(7));
   const [dateTo, setDateTo] = useState<Dayjs>(todayMinus(0));
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [status, setStatus] = useState<JobStatus | null>(null);
-  const [articles, setArticles] = useState<CrawledArticle[]>([]);
+  const [campaign, setCampaign] = useState<CampaignStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceItem[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
+  const [keywords, setKeywords] = useState<KeywordOption[]>([]);
+  const [selectedKeywordIds, setSelectedKeywordIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    authFetch("/api/sources")
-      .then((res) => (res.ok ? res.json() : { sources: [] }))
-      .then((data) => setSources(data.sources ?? []))
-      .catch(() => setSources([]));
+    authFetch("/api/sources").then((res) => (res.ok ? res.json() : { sources: [] })).then((data) => setSources(data.sources ?? []));
+    authFetch("/api/keywords").then((res) => (res.ok ? res.json() : { keywords: [] })).then((data) => setKeywords(data.keywords ?? []));
   }, []);
 
   function toggleSource(sourceId: string) {
-    setSelectedSourceIds((prev) =>
-      prev.includes(sourceId) ? prev.filter((id) => id !== sourceId) : [...prev, sourceId]
-    );
+    setSelectedSourceIds((prev) => (prev.includes(sourceId) ? prev.filter((id) => id !== sourceId) : [...prev, sourceId]));
   }
 
   function applyPreset(days: number) {
@@ -84,136 +67,104 @@ export default function ReportCreate() {
   const parsedDayCount = dateTo.diff(dateFrom, "day");
   const dayCount = Number.isFinite(parsedDayCount) ? Math.max(1, parsedDayCount) : 1;
 
-  // Cập nhật status job + tự dọn sessionStorage khi job đã ở trạng thái kết thúc
-  // (completed/failed/cancelled) — tránh effect khôi phục F5 tìm lại 1 job đã xong.
-  function updateStatus(data: JobStatus) {
-    setStatus(data);
-    if (!["pending", "running"].includes(data.status)) {
-      sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
+  // Cập nhật status Campaign + tự dọn sessionStorage khi Campaign đã ở trạng thái
+  // không còn ACTIVE (COMPLETED — ONE_SHOT tự chuyển sau khi chord crawl xong)
+  function updateCampaignStatus(data: CampaignStatus) {
+    setCampaign(data);
+    if (data.status !== "ACTIVE") {
+      sessionStorage.removeItem(CAMPAIGN_ID_STORAGE_KEY);
     }
   }
 
-  // Khôi phục job đang chạy sau F5 — trang này luôn mount ngay khi user vào /reports/create,
-  // KHÔNG cần cơ chế "tự mở modal" như bản Next.js (vì đây đã là 1 trang riêng, luôn hiển thị).
+  // Khôi phục Campaign đang ACTIVE sau F5 — giữ đúng pattern job cũ
   useEffect(() => {
-    const savedJobId = sessionStorage.getItem(JOB_ID_STORAGE_KEY);
-    if (!savedJobId) return;
-    (async () => {
-      const [statusRes, articlesRes] = await Promise.all([
-        authFetch(`/api/reports/${savedJobId}/status`),
-        authFetch(`/api/reports/${savedJobId}/articles`),
-      ]);
-      if (!statusRes.ok) {
-        sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
+    const savedId = sessionStorage.getItem(CAMPAIGN_ID_STORAGE_KEY);
+    if (!savedId) return;
+    authFetch(`/api/campaigns/${savedId}`).then((res) => {
+      if (!res.ok) {
+        sessionStorage.removeItem(CAMPAIGN_ID_STORAGE_KEY);
         return;
       }
-      setJobId(savedJobId);
-      updateStatus(await statusRes.json());
-      if (articlesRes.ok) setArticles((await articlesRes.json()).articles);
-    })();
+      res.json().then(updateCampaignStatus);
+    });
   }, []);
 
-  // Polling mỗi 3 giây khi job đang pending/running — dừng lại (cleanup) ngay khi
-  // status đổi sang trạng thái không active (completed/failed/cancelled) nhờ dependency
-  // [jobId, status?.status]. Cờ `cancelled` chặn race condition: nếu job bị Cancel
-  // (hoặc effect bị cleanup) ngay lúc 1 request poll đang bay, response cũ (mang trạng
-  // thái lỗi thời) về sau sẽ bị bỏ qua thay vì ghi đè ngược trạng thái mới hơn.
+  // Polling mỗi 3 giây trong lúc Campaign đang ACTIVE (chord Celery đang crawl toàn bộ
+  // nguồn đã chọn) — dừng khi status đổi sang COMPLETED. Cờ `cancelled` chặn race
+  // condition nếu response về sau khi effect đã cleanup (giống pattern job cũ).
   useEffect(() => {
-    const activeStatuses = ["pending", "running"];
-    if (!jobId || !status || !activeStatuses.includes(status.status)) return;
+    if (!campaign || campaign.status !== "ACTIVE") return;
     let cancelled = false;
     const interval = setInterval(async () => {
-      const [statusRes, articlesRes] = await Promise.all([
-        authFetch(`/api/reports/${jobId}/status`),
-        authFetch(`/api/reports/${jobId}/articles`),
-      ]);
-      if (cancelled) return;
-      if (statusRes.ok) updateStatus(await statusRes.json());
-      if (articlesRes.ok) setArticles((await articlesRes.json()).articles);
+      const res = await authFetch(`/api/campaigns/${campaign.campaign_id}`);
+      if (cancelled || !res.ok) return;
+      updateCampaignStatus(await res.json());
     }, 3000);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [jobId, status?.status]);
+  }, [campaign?.campaign_id, campaign?.status]);
 
-  // Tạo job báo cáo mới. Chặn double-click bằng `submitting`: job AI chạy CPU-only tốn
-  // nhiều phút/bài, bấm trùng sẽ tạo 2 job Celery song song rất lãng phí tài nguyên.
-  // Lưu job_id vào sessionStorage để effect khôi phục sau F5 (phía trên) tìm lại được.
+  // Tạo Campaign mode=ONE_SHOT rồi activate ngay — thay thế POST /api/reports/create cũ
+  // (Phase 7). Activate dispatch 1 Celery chord crawl toàn bộ nguồn đã chọn, tự chuyển
+  // status sang COMPLETED khi xong (backend/routers/campaigns.py + workers/campaign_tasks.py).
+  // Chặn double-click bằng `submitting`, lưu campaign_id vào sessionStorage để effect
+  // khôi phục sau F5 tìm lại được (giữ đúng pattern job cũ).
   async function handleSubmit() {
+    if (!user) return;
     setSubmitting(true);
     setError(null);
     try {
-      const res = await authFetch("/api/reports/create", {
+      const createRes = await authFetch("/api/campaigns", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          name: `Báo cáo nhanh ${dayjs().format("DD/MM/YYYY HH:mm")}`,
+          mode: "ONE_SHOT",
+          owner_id: user.user_id,
+          start_date: dateFrom.format("YYYY-MM-DD"),
+          end_date: dateTo.format("YYYY-MM-DD"),
           source_ids: selectedSourceIds,
-          date_from: dateFrom.format("YYYY-MM-DD"),
-          date_to: dateTo.format("YYYY-MM-DD"),
+          keyword_ids: selectedKeywordIds,
         }),
       });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setError(body.detail || "Tạo báo cáo thất bại");
+      if (!createRes.ok) {
+        const body = await createRes.json().catch(() => ({}));
+        setError(body.detail || "Tạo chiến dịch thất bại");
         return;
       }
-      const data = await res.json();
-      sessionStorage.setItem(JOB_ID_STORAGE_KEY, data.job_id);
-      setJobId(data.job_id);
-      setArticles([]);
-      updateStatus({ job_id: data.job_id, status: data.status, progress: { crawled: 0, analyzed: 0, total_estimated: 0 } });
+      const created = await createRes.json();
+
+      const activateRes = await authFetch(`/api/campaigns/${created.campaign_id}/activate`, { method: "POST" });
+      if (!activateRes.ok) {
+        const body = await activateRes.json().catch(() => ({}));
+        setError(body.detail || "Kích hoạt thất bại");
+        return;
+      }
+      const activated = await activateRes.json();
+      sessionStorage.setItem(CAMPAIGN_ID_STORAGE_KEY, activated.campaign_id);
+      updateCampaignStatus(activated);
     } finally {
       setSubmitting(false);
     }
   }
 
-  // Tải file DOCX qua authFetch (thay vì <a href>) vì endpoint download giờ yêu cầu
-  // Bearer token — thẻ <a> thường không gắn được header Authorization khi điều hướng.
-  async function handleDownload(jobId: string) {
-    const res = await authFetch(`/api/reports/${jobId}/download`);
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${jobId}.docx`;
-    link.click();
-    window.URL.revokeObjectURL(url);
-  }
-
-  // Hủy job đang chạy. Dùng updater callback (setStatus(prev => ...)) thay vì đóng
-  // (closure) trực tiếp biến `status` để không vô tình ghi đè bằng snapshot cũ nếu
-  // state đã đổi trong lúc chờ response. Báo lỗi rõ ràng khi cancel thất bại (vd job
-  // vừa chuyển completed/failed ngay trước đó — backend trả 400) thay vì im lặng bỏ qua.
-  async function handleCancel() {
-    if (!status) return;
-    const res = await authFetch(`/api/reports/${status.job_id}/cancel`, { method: "POST" });
-    if (res.ok) {
-      const data = await res.json();
-      setStatus((prev) => (prev ? { ...prev, status: data.status } : prev));
-      sessionStorage.removeItem(JOB_ID_STORAGE_KEY);
-    } else {
-      setError("Không thể hủy job — job có thể đã hoàn tất hoặc gặp lỗi trước đó.");
-    }
-  }
-
-  // `submitting` chỉ đúng trong lúc gọi POST /create (vài trăm ms) — job crawl+AI thật
-  // chạy nền 8-13 giây hoặc lâu hơn sau đó, nên phải khóa nút suốt thời gian job còn
-  // pending/running (jobActive), không chỉ trong lúc gọi API tạo job. Thiếu điều kiện
-  // này cho phép spam click tạo hàng loạt job trùng lặp trong lúc job trước còn chạy.
-  const jobActive = status?.status === "pending" || status?.status === "running";
+  const campaignActive = campaign?.status === "ACTIVE";
   const disabled =
-    !dateFrom || !dateTo || dateFrom.isAfter(dateTo) || selectedSourceIds.length === 0 || jobActive || submitting;
-  const canCancel = jobActive;
-  const progressPercent = status && status.progress.total_estimated > 0
-    ? Math.round(((status.progress.crawled + status.progress.analyzed) / (status.progress.total_estimated * 2)) * 100)
-    : 0;
+    !dateFrom ||
+    !dateTo ||
+    dateFrom.isAfter(dateTo) ||
+    selectedSourceIds.length === 0 ||
+    selectedKeywordIds.length === 0 ||
+    !user ||
+    campaignActive ||
+    submitting;
 
   return (
     <div>
       <PageHeader
-        title="Tạo báo cáo mới"
+        title="Tạo báo cáo nhanh"
         breadcrumbs={[{ title: "Tổng quan", href: "/" }, { title: "Báo cáo", href: "/reports" }, { title: "Tạo mới" }]}
       />
 
@@ -239,6 +190,15 @@ export default function ReportCreate() {
                   <DatePicker value={dateTo} onChange={(v) => v && setDateTo(v)} style={{ display: "block" }} />
                 </div>
               </Space>
+              <Typography.Text>Từ khóa (bắt buộc ≥1)</Typography.Text>
+              <Select
+                mode="multiple"
+                style={{ width: "100%", marginBottom: 12 }}
+                placeholder="Chọn từ khóa cần theo dõi"
+                value={selectedKeywordIds}
+                onChange={setSelectedKeywordIds}
+                options={keywords.map((k) => ({ value: k.keyword_id, label: k.keyword }))}
+              />
               <SummaryCard sourceCount={selectedSourceIds.length} dayCount={dayCount} />
             </div>
           </div>
@@ -254,55 +214,23 @@ export default function ReportCreate() {
 
           {error && <Alert type="error" message={error} showIcon />}
 
-          {status && (
+          {campaign && (
             <div>
               <Space align="center">
-                <Tag color={statusColor[status.status]}>{status.status}</Tag>
+                <Tag color={statusColor[campaign.status]}>{campaign.status}</Tag>
                 <Typography.Text>
-                  Đã crawl: {status.progress.crawled} bài — Đã phân tích: {status.progress.analyzed} bài
+                  {campaign.status === "ACTIVE" && "Đang crawl toàn bộ nguồn đã chọn..."}
+                  {campaign.status === "COMPLETED" && "Crawl xong — vào trang chiến dịch để tạo báo cáo."}
                 </Typography.Text>
               </Space>
-              <Progress percent={progressPercent} style={{ marginTop: 8 }} />
-              <Space style={{ marginTop: 8 }}>
-                {canCancel && (
-                  <Popconfirm title="Hủy job này?" onConfirm={handleCancel}>
-                    <Button danger>Cancel</Button>
-                  </Popconfirm>
-                )}
-                {status.status === "completed" && (
-                  <Button type="link" onClick={() => handleDownload(status.job_id)}>
-                    Tải báo cáo DOCX
+              {campaign.status === "COMPLETED" && (
+                <div style={{ marginTop: 8 }}>
+                  <Button type="link" onClick={() => navigate(`/campaigns/${campaign.campaign_id}`)}>
+                    Đến trang chiến dịch để tạo báo cáo →
                   </Button>
-                )}
-              </Space>
-              {status.status === "failed" && <Alert style={{ marginTop: 8 }} type="error" message={`Lỗi: ${status.error_log}`} />}
-              {status.status === "cancelled" && <Alert style={{ marginTop: 8 }} type="info" message="Job đã bị hủy." />}
+                </div>
+              )}
             </div>
-          )}
-
-          {articles.length > 0 && (
-            <Table<CrawledArticle>
-              size="small"
-              rowKey="url"
-              dataSource={articles}
-              pagination={{ pageSize: 10 }}
-              columns={[
-                { title: "STT", render: (_v, _r, index) => index + 1, width: 60 },
-                {
-                  title: "Tiêu đề",
-                  render: (_v, a) => (
-                    <a href={a.url} target="_blank" rel="noopener noreferrer">
-                      {a.title || a.url}
-                    </a>
-                  ),
-                },
-                { title: "Nguồn", render: (_v, a) => a.source_name || "-" },
-                { title: "Trạng thái", dataIndex: "status" },
-                { title: "Crawl", render: (_v, a) => formatSeconds(a.crawl_duration_seconds) },
-                { title: "Phân tích", render: (_v, a) => formatSeconds(a.analysis_duration_seconds) },
-                { title: "Tổng", render: (_v, a) => formatSeconds(a.total_duration_seconds) },
-              ]}
-            />
           )}
         </Space>
       </Card>
