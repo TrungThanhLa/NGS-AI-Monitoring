@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from backend.models import Campaign, CampaignSource, Source
-from backend.workers.scheduler import list_due_sources
+from backend.workers.scheduler import list_due_sources, complete_expired_continuous_campaigns
 
 
 def _make_campaign(db_session, status="ACTIVE"):
@@ -103,3 +103,75 @@ def test_list_due_sources_includes_source_watched_by_continuous_campaign_even_if
     due = list_due_sources(db_session)
 
     assert source.source_id in {s.source_id for s in due}
+
+
+def test_complete_expired_continuous_campaigns_marks_completed(db_session):
+    now = datetime.now(timezone.utc)
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-10", status="ACTIVE", mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.commit()
+
+    count = complete_expired_continuous_campaigns(db_session, now=now)
+
+    db_session.refresh(campaign)
+    assert count == 1
+    assert campaign.status == "COMPLETED"
+
+
+def test_complete_expired_continuous_campaigns_ignores_campaign_without_end_date(db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.commit()
+
+    count = complete_expired_continuous_campaigns(db_session)
+
+    db_session.refresh(campaign)
+    assert count == 0
+    assert campaign.status == "ACTIVE"
+
+
+def test_complete_expired_continuous_campaigns_ignores_campaign_with_future_end_date(db_session):
+    now = datetime.now(timezone.utc)
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2099-01-01", status="ACTIVE", mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.commit()
+
+    count = complete_expired_continuous_campaigns(db_session, now=now)
+
+    db_session.refresh(campaign)
+    assert count == 0
+    assert campaign.status == "ACTIVE"
+
+
+def test_complete_expired_continuous_campaigns_ignores_one_shot_campaign(db_session):
+    now = datetime.now(timezone.utc)
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-10", status="ACTIVE", mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.commit()
+
+    count = complete_expired_continuous_campaigns(db_session, now=now)
+
+    db_session.refresh(campaign)
+    assert count == 0
+    assert campaign.status == "ACTIVE"
+
+
+def test_complete_expired_continuous_campaigns_ignores_already_paused_campaign(db_session):
+    now = datetime.now(timezone.utc)
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-10", status="PAUSED", mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.commit()
+
+    count = complete_expired_continuous_campaigns(db_session, now=now)
+
+    db_session.refresh(campaign)
+    assert count == 0
+    assert campaign.status == "PAUSED"

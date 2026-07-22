@@ -41,6 +41,30 @@ def list_due_sources(db, now: datetime | None = None) -> list[Source]:
     return due
 
 
+def complete_expired_continuous_campaigns(db, now: datetime | None = None) -> int:
+    """Campaign CONTINUOUS có end_date đã qua nhưng vẫn ACTIVE → tự chuyển COMPLETED.
+    Trước đây end_date chỉ lưu ở DB, không có cơ chế nào đọc lại — Campaign CONTINUOUS
+    đặt end_date xong vẫn crawl mãi mãi cho tới khi có người bấm Tạm dừng/Lưu trữ thủ
+    công (phát hiện qua smoke test thật 2026-07-22). Gọi ở đầu check_due_sources(), độc
+    lập với SCHEDULER_ENABLED — vòng đời Campaign không nên phụ thuộc việc crawl có đang
+    bật hay không."""
+    now = now or datetime.now(timezone.utc)
+    expired = (
+        db.query(Campaign)
+        .filter(
+            Campaign.mode == "CONTINUOUS",
+            Campaign.status == "ACTIVE",
+            Campaign.end_date.isnot(None),
+            Campaign.end_date <= now,
+        )
+        .all()
+    )
+    for campaign in expired:
+        campaign.status = "COMPLETED"
+    db.commit()
+    return len(expired)
+
+
 from backend.db import SessionLocal
 from backend.system_settings import get_bool_setting
 from backend.workers.celery_app import celery_app
@@ -59,6 +83,7 @@ from backend.workers import continuous_crawl
 def check_due_sources() -> None:
     db = SessionLocal()
     try:
+        complete_expired_continuous_campaigns(db)
         if not get_bool_setting(db, "SCHEDULER_ENABLED"):
             return
         for source in list_due_sources(db):
