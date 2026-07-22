@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { App, Button, Card, Col, DatePicker, Descriptions, Row, Select, Space, Table, Tag, Tooltip } from 'antd'
 import { EditOutlined, ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -49,9 +49,21 @@ export default function CampaignDetail() {
   const [reportRange, setReportRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [reportFormat, setReportFormat] = useState('docx')
   const [creatingReport, setCreatingReport] = useState(false)
+  const hasPrefilledRange = useRef(false)
 
   function loadCampaign() {
-    authFetch(`/api/campaigns/${id}`).then((r) => r.json()).then(setCampaign)
+    authFetch(`/api/campaigns/${id}`)
+      .then((r) => r.json())
+      .then((c: Campaign) => {
+        setCampaign(c)
+        // Tự điền sẵn khoảng ngày tạo báo cáo theo start_date/end_date của Campaign —
+        // chỉ điền 1 lần lúc load đầu, không ghi đè lựa chọn người dùng đã tự đổi sau đó
+        // (loadCampaign còn được gọi lại sau Activate/Pause)
+        if (!hasPrefilledRange.current) {
+          hasPrefilledRange.current = true
+          setReportRange([dayjs(c.start_date), c.end_date ? dayjs(c.end_date) : dayjs()])
+        }
+      })
   }
   function loadReports() {
     authFetch(`/api/campaigns/${id}/reports`).then((r) => r.json()).then((d) => setReports(d.reports ?? []))
