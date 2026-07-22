@@ -20,14 +20,6 @@ from backend.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
-# Cờ CHỈ dùng trong test (backend/tests/test_campaign_tasks.py) — khi test patch
-# SessionLocal để trả thẳng session của fixture db_session (dùng chung transaction/savepoint
-# để assert được ngay sau khi task chạy xong), task KHÔNG được tự gọi db.close() ở cuối vì
-# sẽ làm session của fixture mất trạng thái persistent (lỗi "Instance is not persistent
-# within this Session" khi test gọi db_session.refresh() sau đó). Production luôn chạy False
-# — SessionLocal tạo session riêng, phải tự đóng như bình thường.
-_SKIP_CLOSE_FOR_TESTS = False
-
 _GENERATORS = {
     "docx": lambda date_from, date_to, aggregates, path: generate_docx(date_from, date_to, aggregates, path),
     "pdf": lambda date_from, date_to, aggregates, path: generate_pdf(date_from, date_to, aggregates, path),
@@ -92,12 +84,10 @@ def _analyze_pending_articles(db: Session, article_ids: list[uuid.UUID]) -> None
         db.commit()
 
 
-@celery_app.task(name="campaign_tasks.generate_campaign_report")
-def generate_campaign_report(report_id: str, campaign_id: str, date_from: str, date_to: str, format: str) -> None:
-    """report_id trỏ tới 1 dòng report_history đã tạo sẵn (status='pending') lúc
-    POST /api/campaigns/{id}/reports — task này cập nhật status ngay trên dòng đó để FE
-    polling theo report_id (GET /api/campaigns/{id}/reports/{report_id})."""
-    db = SessionLocal()
+def _generate_campaign_report(db: Session, report_id: str, campaign_id: str, date_from: str, date_to: str, format: str) -> None:
+    """Logic thật của generate_campaign_report — tách riêng khỏi việc mở/đóng session để
+    test gọi thẳng với fixture db_session (giống _generate_report trong report_job.py),
+    không cần patch SessionLocal."""
     try:
         report = db.get(ReportHistory, uuid.UUID(report_id))
         if report is None:
@@ -139,6 +129,15 @@ def generate_campaign_report(report_id: str, campaign_id: str, date_from: str, d
             report.status = "failed"
             report.error_log = str(exc)
             db.commit()
+
+
+@celery_app.task(name="campaign_tasks.generate_campaign_report")
+def generate_campaign_report(report_id: str, campaign_id: str, date_from: str, date_to: str, format: str) -> None:
+    """report_id trỏ tới 1 dòng report_history đã tạo sẵn (status='pending') lúc
+    POST /api/campaigns/{id}/reports — task này cập nhật status ngay trên dòng đó để FE
+    polling theo report_id (GET /api/campaigns/{id}/reports/{report_id})."""
+    db = SessionLocal()
+    try:
+        _generate_campaign_report(db, report_id, campaign_id, date_from, date_to, format)
     finally:
-        if not _SKIP_CLOSE_FOR_TESTS:
-            db.close()
+        db.close()

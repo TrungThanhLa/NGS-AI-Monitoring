@@ -4,8 +4,7 @@ from datetime import date, datetime
 from unittest.mock import patch
 
 from backend.models import Article, Campaign, CampaignArticle, ReportHistory, Source
-from backend.workers import campaign_tasks
-from backend.workers.campaign_tasks import generate_campaign_report, resolve_campaign_article_ids
+from backend.workers.campaign_tasks import _generate_campaign_report, resolve_campaign_article_ids
 
 
 def _make_campaign(db_session):
@@ -88,16 +87,12 @@ def test_generate_campaign_report_analyzes_pending_and_writes_json(db_session, t
     # (khác với ví dụ ban đầu trong brief dùng _async_result() wrapper, gây double-await lỗi
     # "'coroutine' object is not subscriptable" khi chạy thật).
     #
-    # patch("...SessionLocal", return_value=db_session) (cách đầu tiên brief đề xuất) gây lỗi
-    # "Instance is not persistent within this Session" ở db_session.refresh() bên dưới, vì
-    # task tự gọi db.close() ở cuối làm session của fixture mất trạng thái persistent — đúng
-    # rủi ro brief đã cảnh báo. Đổi sang cách dự phòng: monkeypatch.setattr trực tiếp +
-    # cờ _SKIP_CLOSE_FOR_TESTS để task không tự đóng session của fixture.
-    monkeypatch.setattr(campaign_tasks, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(campaign_tasks, "_SKIP_CLOSE_FOR_TESTS", True)
+    # Gọi thẳng _generate_campaign_report(db_session, ...) — hàm inner không tự mở/đóng
+    # session (giống _generate_report(db, job) trong report_job.py) — không cần patch
+    # SessionLocal, không cần cờ test-only nào.
     with patch("backend.workers.campaign_tasks.analyze_article", return_value=fake_result):
-        generate_campaign_report.run(
-            str(report.report_id), str(campaign.campaign_id), "2026-06-01", "2026-06-30", "json"
+        _generate_campaign_report(
+            db_session, str(report.report_id), str(campaign.campaign_id), "2026-06-01", "2026-06-30", "json"
         )
 
     db_session.refresh(report)
@@ -114,14 +109,12 @@ def test_generate_campaign_report_marks_failed_on_exception(db_session, tmp_path
     db_session.add(report)
     db_session.commit()
 
-    monkeypatch.setattr(campaign_tasks, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(campaign_tasks, "_SKIP_CLOSE_FOR_TESTS", True)
     with patch(
         "backend.workers.campaign_tasks.resolve_campaign_article_ids",
         side_effect=RuntimeError("boom"),
     ):
-        generate_campaign_report.run(
-            str(report.report_id), str(campaign.campaign_id), "2026-06-01", "2026-06-30", "docx"
+        _generate_campaign_report(
+            db_session, str(report.report_id), str(campaign.campaign_id), "2026-06-01", "2026-06-30", "docx"
         )
 
     db_session.refresh(report)
