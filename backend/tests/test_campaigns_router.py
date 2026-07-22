@@ -1,6 +1,6 @@
 import uuid
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from backend.auth.dependencies import get_current_user
 from backend.db import get_db
-from backend.models import Campaign, CampaignSource, Keyword, ReportHistory, Role, Source, User, UserRole
+from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Role, Source, User, UserRole
 from backend.routers import campaigns
 
 
@@ -386,3 +386,39 @@ def test_list_campaign_reports_sorted_newest_first(app_client, admin_user, db_se
 
     ids = [r["report_id"] for r in response.json()["reports"]]
     assert ids == [str(r2.report_id), str(r1.report_id)]
+
+
+def test_activate_one_shot_campaign_dispatches_chord(app_client, admin_user, source, keyword, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        mock_chord.return_value.return_value = MagicMock()
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ACTIVE"
+    mock_chord.assert_called_once()
+
+
+def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_user, source, keyword, db_session):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 200
+    mock_chord.assert_not_called()

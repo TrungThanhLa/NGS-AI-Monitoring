@@ -1,5 +1,6 @@
 import uuid
 
+from celery import chord
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -9,7 +10,8 @@ from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
 from backend.models import Campaign, CampaignKeyword, CampaignSource, Keyword, ReportHistory, Source, User
-from backend.workers.campaign_tasks import generate_campaign_report
+from backend.workers import continuous_crawl
+from backend.workers.campaign_tasks import generate_campaign_report, mark_crawl_done
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -332,6 +334,16 @@ def activate_campaign(
         request=request,
     )
     db.commit()
+
+    # ONE_SHOT: crawl NGAY toàn bộ Source đã chọn, không đợi Celery Beat (BR-CAMP-07 —
+    # "không đăng ký Celery Beat"). Dùng chord: group các crawl_task (1/Source) chạy
+    # song song, callback mark_crawl_done chỉ chạy SAU KHI TẤT CẢ đã xong.
+    if campaign.mode == "ONE_SHOT":
+        source_ids = _campaign_source_ids(db, campaign.campaign_id)
+        chord(
+            (continuous_crawl.crawl_task.s(sid) for sid in source_ids),
+            mark_crawl_done.s(str(campaign.campaign_id)),
+        ).apply_async()
 
     return _serialize_campaign(db, campaign)
 
