@@ -68,3 +68,11 @@ def test_campaign_article_and_keyword_bridge_roundtrip(db_session):
     assert ca.article_id == article.article_id
     cak = db_session.query(CampaignArticleKeyword).filter_by(campaign_id=campaign.campaign_id).one()
     assert cak.keyword_id == keyword.keyword_id
+
+
+def test_source_discover_backfilled_from_defaults_to_none(db_session):
+    source = Source(name="BF", domain=f"bf-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.commit()
+
+    assert source.discover_backfilled_from is None
