@@ -639,10 +639,12 @@ def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_
 
 
 def test_activate_continuous_campaign_rejects_when_scheduler_disabled(app_client, admin_user, source, keyword, db_session):
-    # SCHEDULER_ENABLED mặc định 'false' (seed migration 0018) — không cần set gì thêm.
     # CONTINUOUS phụ thuộc Celery Beat để thực sự crawl; nếu công tắc đang tắt, kích hoạt
     # "thành công" (status=ACTIVE) nhưng không có gì được crawl cho tới khi Admin bật lại —
-    # dễ gây hiểu nhầm. Chặn hẳn ở đây thay vì chỉ cảnh báo UI.
+    # dễ gây hiểu nhầm. Chặn hẳn ở đây thay vì chỉ cảnh báo UI. Set tường minh 'false' thay
+    # vì trông cậy giá trị seed mặc định — DB dev thật có thể đã bị đổi qua UI/API trước đó.
+    db_session.query(SystemSetting).filter_by(setting_key="SCHEDULER_ENABLED").update({"setting_value": "false"})
+    db_session.commit()
     campaign = Campaign(
         name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS"
     )

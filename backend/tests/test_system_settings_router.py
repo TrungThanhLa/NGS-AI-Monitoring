@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.auth.dependencies import get_current_user
 from backend.db import get_db
-from backend.models import Role, User, UserRole
+from backend.models import Campaign, Role, User, UserRole
 from backend.routers import system_settings
 
 
@@ -76,3 +76,38 @@ def test_update_unknown_setting_returns_404(app_client):
     response = app_client.put("/api/system-settings/KHONG_TON_TAI", json={"setting_value": "true"})
 
     assert response.status_code == 404
+
+
+def test_disabling_scheduler_pauses_active_continuous_campaigns(app_client, db_session):
+    continuous_active = Campaign(name="C1", start_date="2026-06-01", status="ACTIVE", mode="CONTINUOUS")
+    continuous_paused = Campaign(name="C2", start_date="2026-06-01", status="PAUSED", mode="CONTINUOUS")
+    one_shot_active = Campaign(
+        name="C3", start_date="2026-06-01", end_date="2026-06-01", status="ACTIVE", mode="ONE_SHOT"
+    )
+    db_session.add_all([continuous_active, continuous_paused, one_shot_active])
+    db_session.commit()
+
+    response = app_client.put("/api/system-settings/SCHEDULER_ENABLED", json={"setting_value": "false"})
+
+    assert response.status_code == 200
+    assert response.json()["paused_campaign_ids"] == [str(continuous_active.campaign_id)]
+
+    db_session.refresh(continuous_active)
+    db_session.refresh(continuous_paused)
+    db_session.refresh(one_shot_active)
+    assert continuous_active.status == "PAUSED"
+    assert continuous_paused.status == "PAUSED"  # không đổi, đã PAUSED từ trước
+    assert one_shot_active.status == "ACTIVE"  # ONE_SHOT không bị đụng tới
+
+
+def test_enabling_scheduler_does_not_touch_any_campaign(app_client, db_session):
+    continuous_active = Campaign(name="C1", start_date="2026-06-01", status="ACTIVE", mode="CONTINUOUS")
+    db_session.add(continuous_active)
+    db_session.commit()
+
+    response = app_client.put("/api/system-settings/SCHEDULER_ENABLED", json={"setting_value": "true"})
+
+    assert response.status_code == 200
+    assert response.json()["paused_campaign_ids"] == []
+    db_session.refresh(continuous_active)
+    assert continuous_active.status == "ACTIVE"

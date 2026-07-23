@@ -5,7 +5,7 @@ import { authFetch } from '@/lib/api'
 
 export default function SystemSettings() {
   const [form] = Form.useForm()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
 
   const [schedulerEnabled, setSchedulerEnabled] = useState(false)
   const [aiAutoTrigger, setAiAutoTrigger] = useState(false)
@@ -34,7 +34,47 @@ export default function SystemSettings() {
       onLocalRevert()
       return
     }
-    message.success('Cập nhật cấu hình thành công')
+    const body = await res.json().catch(() => ({}))
+    const pausedCount: number = body.paused_campaign_ids?.length ?? 0
+    message.success(
+      pausedCount > 0
+        ? `Cập nhật cấu hình thành công — đã tự động Tạm dừng ${pausedCount} Chiến dịch giám sát liên tục đang hoạt động`
+        : 'Cập nhật cấu hình thành công',
+    )
+  }
+
+  // Tắt SCHEDULER_ENABLED lúc còn Campaign CONTINUOUS ACTIVE sẽ khiến chúng "ACTIVE giả"
+  // (không crawl gì nhưng vẫn hiện đang giám sát) — backend tự Tạm dừng chúng khi tắt
+  // (xem system_settings.py update_setting), nhưng vẫn cần cảnh báo trước để Admin biết
+  // rõ hệ quả trước khi xác nhận, vì đây là thay đổi trạng thái hàng loạt.
+  const onToggleScheduler = async (checked: boolean) => {
+    if (checked) {
+      setSchedulerEnabled(true)
+      updateSetting('SCHEDULER_ENABLED', true, () => setSchedulerEnabled(false))
+      return
+    }
+
+    const res = await authFetch('/api/campaigns?status=ACTIVE')
+    const body = await res.json().catch(() => ({ campaigns: [] }))
+    const activeContinuousCount = (body.campaigns ?? []).filter((c: { mode: string }) => c.mode === 'CONTINUOUS').length
+
+    if (activeContinuousCount === 0) {
+      setSchedulerEnabled(false)
+      updateSetting('SCHEDULER_ENABLED', false, () => setSchedulerEnabled(true))
+      return
+    }
+
+    modal.confirm({
+      title: 'Tắt Giám sát liên tục?',
+      content: `Đang có ${activeContinuousCount} Chiến dịch giám sát liên tục hoạt động — tắt công tắc này sẽ TỰ ĐỘNG chuyển tất cả sang Tạm dừng. Muốn kích hoạt lại sau này phải làm thủ công từng Chiến dịch. Bạn có chắc chắn muốn tắt?`,
+      okText: 'Vẫn tắt',
+      cancelText: 'Hủy',
+      okButtonProps: { danger: true },
+      onOk: () => {
+        setSchedulerEnabled(false)
+        updateSetting('SCHEDULER_ENABLED', false, () => setSchedulerEnabled(true))
+      },
+    })
   }
 
   const onSave = () => {
@@ -94,14 +134,7 @@ export default function SystemSettings() {
           <Card title="Giám sát liên tục" style={{ borderRadius: 12 }}>
             <Form layout="vertical">
               <Form.Item label="Bật Celery Beat tự động crawl liên tục theo Campaign đang hoạt động">
-                <Switch
-                  checked={schedulerEnabled}
-                  loading={loadingSettings}
-                  onChange={(checked) => {
-                    setSchedulerEnabled(checked)
-                    updateSetting('SCHEDULER_ENABLED', checked, () => setSchedulerEnabled(!checked))
-                  }}
-                />
+                <Switch checked={schedulerEnabled} loading={loadingSettings} onChange={onToggleScheduler} />
               </Form.Item>
               <Form.Item label="Tự động chạy AI phân tích ngay sau khi crawl xong 1 bài">
                 <Switch
