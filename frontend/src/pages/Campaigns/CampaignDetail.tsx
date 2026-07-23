@@ -61,7 +61,7 @@ const FORMAT_OPTIONS = [
 export default function CampaignDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
 
   const [campaign, setCampaign] = useState<Campaign | null>(null)
   const [reports, setReports] = useState<ReportRow[]>([])
@@ -134,7 +134,15 @@ export default function CampaignDetail() {
     const res = await authFetch(`/api/campaigns/${id}/activate`, { method: 'POST' })
     if (!res.ok) {
       const body = await res.json().catch(() => ({}))
-      message.error(body.detail || 'Kích hoạt thất bại')
+      const detail: string = body.detail || 'Kích hoạt thất bại'
+      // SCHEDULER_ENABLED tắt là lỗi nghiêm trọng dễ bị bỏ qua nếu chỉ hiện toast thoáng
+      // qua (Campaign vẫn tưởng kích hoạt được nếu người dùng không đọc kỹ) — dùng dialog
+      // chặn (Modal) thay vì message để chắc chắn người dùng phải xác nhận đã đọc
+      if (detail.includes('SCHEDULER_ENABLED')) {
+        modal.error({ title: 'Không thể kích hoạt', content: detail })
+        return
+      }
+      message.error(detail)
       return
     }
     message.success('Đã kích hoạt chiến dịch')

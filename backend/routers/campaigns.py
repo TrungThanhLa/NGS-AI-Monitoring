@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
+from backend.system_settings import get_bool_setting
 from backend.models import (
     Article,
     Campaign,
@@ -360,6 +361,17 @@ def activate_campaign(
         raise HTTPException(
             status_code=400,
             detail="Chiến dịch cần ít nhất 1 nguồn dữ liệu và 1 từ khóa để kích hoạt (BR-CAMP-03)",
+        )
+
+    # CONTINUOUS phụ thuộc Celery Beat (check_due_sources) để thực sự crawl — nếu
+    # SCHEDULER_ENABLED đang tắt, kích hoạt vẫn chuyển status=ACTIVE "thành công" nhưng
+    # không có gì được crawl cho tới khi Admin bật lại, dễ gây hiểu nhầm là hệ thống đang
+    # giám sát. Chặn hẳn ở đây thay vì chỉ cảnh báo UI (phát hiện qua trao đổi thực tế
+    # 2026-07-23) — ONE_SHOT không phụ thuộc SCHEDULER_ENABLED nên không áp dụng.
+    if campaign.mode == "CONTINUOUS" and not get_bool_setting(db, "SCHEDULER_ENABLED"):
+        raise HTTPException(
+            status_code=400,
+            detail="SCHEDULER_ENABLED chưa được bật — không thể kích hoạt Chiến dịch giám sát liên tục lúc này. Liên hệ Admin để bật ở Cấu hình hệ thống.",
         )
 
     old_status = campaign.status

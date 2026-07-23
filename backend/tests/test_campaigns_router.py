@@ -20,6 +20,7 @@ from backend.models import (
     ReportHistory,
     Role,
     Source,
+    SystemSetting,
     User,
     UserRole,
 )
@@ -243,6 +244,11 @@ def test_delete_campaign_already_archived_returns_400(app_client, admin_user, db
     assert response.status_code == 400
 
 
+def _enable_scheduler(db_session):
+    db_session.query(SystemSetting).filter_by(setting_key="SCHEDULER_ENABLED").update({"setting_value": "true"})
+    db_session.commit()
+
+
 def test_activate_campaign_requires_source_and_keyword(app_client, admin_user):
     create_response = app_client.post(
         "/api/campaigns", json={"name": "Thiếu source/keyword", "start_date": "2026-08-01", "owner_id": str(admin_user.user_id)}
@@ -254,7 +260,8 @@ def test_activate_campaign_requires_source_and_keyword(app_client, admin_user):
     assert response.status_code == 400  # BR-CAMP-03
 
 
-def test_activate_campaign_succeeds_with_source_and_keyword(app_client, admin_user, source, keyword):
+def test_activate_campaign_succeeds_with_source_and_keyword(app_client, admin_user, source, keyword, db_session):
+    _enable_scheduler(db_session)
     create_response = app_client.post(
         "/api/campaigns",
         json={
@@ -614,6 +621,7 @@ def test_activate_one_shot_campaign_completes_immediately_when_all_sources_alrea
 
 
 def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_user, source, keyword, db_session):
+    _enable_scheduler(db_session)
     campaign = Campaign(
         name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS"
     )
@@ -628,6 +636,49 @@ def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_
 
     assert response.status_code == 200
     mock_chord.assert_not_called()
+
+
+def test_activate_continuous_campaign_rejects_when_scheduler_disabled(app_client, admin_user, source, keyword, db_session):
+    # SCHEDULER_ENABLED mặc định 'false' (seed migration 0018) — không cần set gì thêm.
+    # CONTINUOUS phụ thuộc Celery Beat để thực sự crawl; nếu công tắc đang tắt, kích hoạt
+    # "thành công" (status=ACTIVE) nhưng không có gì được crawl cho tới khi Admin bật lại —
+    # dễ gây hiểu nhầm. Chặn hẳn ở đây thay vì chỉ cảnh báo UI.
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 400
+    assert "SCHEDULER_ENABLED" in response.json()["detail"]
+    db_session.refresh(campaign)
+    assert campaign.status == "DRAFT"
+
+
+def test_activate_one_shot_campaign_ignores_scheduler_disabled(app_client, admin_user, source, keyword, db_session):
+    # ONE_SHOT không phụ thuộc SCHEDULER_ENABLED (crawl ngay qua chord riêng) — SCHEDULER_ENABLED
+    # mặc định 'false' và KHÔNG được chặn ở đây, khác hẳn CONTINUOUS.
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        mock_chord.return_value.return_value = MagicMock()
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ACTIVE"
+    mock_chord.assert_called_once()
 
 
 def test_list_all_reports_history_includes_campaign_name(app_client, admin_user, db_session):
