@@ -174,6 +174,17 @@ export default function CampaignDetail() {
     }
   }
 
+  async function handleCancelReport(reportId: string) {
+    const res = await authFetch(`/api/campaigns/${id}/reports/${reportId}/cancel`, { method: 'POST' })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      message.error(body.detail || 'Hủy báo cáo thất bại')
+      return
+    }
+    message.success('Đã hủy báo cáo')
+    loadReports()
+  }
+
   async function handleDownload(reportId: string, format: string) {
     const res = await authFetch(`/api/campaigns/${id}/reports/${reportId}/download`)
     if (!res.ok) return
@@ -306,6 +317,19 @@ export default function CampaignDetail() {
                   <Button type="link" onClick={() => handleDownload(r.report_id, r.format)}>
                     Tải xuống
                   </Button>
+                ) : (
+                  '-'
+                ),
+            },
+            {
+              title: 'Thao tác',
+              render: (_v, r) =>
+                r.status === 'pending' || r.status === 'running' ? (
+                  <PermissionGuard permission="report.create">
+                    <Button type="link" danger onClick={() => handleCancelReport(r.report_id)}>
+                      Hủy
+                    </Button>
+                  </PermissionGuard>
                 ) : (
                   '-'
                 ),

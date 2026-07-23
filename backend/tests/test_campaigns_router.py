@@ -345,12 +345,13 @@ def test_create_campaign_report_dispatches_celery_task_and_returns_pending(app_c
     assert response.status_code == 202
     body = response.json()
     assert body["status"] == "pending"
-    mock_task.delay.assert_called_once()
+    mock_task.apply_async.assert_called_once()
 
     report = db_session.get(ReportHistory, uuid.UUID(body["report_id"]))
     assert report.campaign_id == campaign.campaign_id
     assert report.format == "docx"
     assert report.status == "pending"
+    assert report.celery_task_id is not None
 
 
 def test_create_campaign_report_rejects_invalid_format(app_client, admin_user, db_session):
@@ -364,6 +365,52 @@ def test_create_campaign_report_rejects_invalid_format(app_client, admin_user, d
     )
 
     assert response.status_code == 400
+
+
+def test_cancel_campaign_report_revokes_task_and_sets_cancelled(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.flush()
+    report = ReportHistory(
+        campaign_id=campaign.campaign_id, file_path="", format="docx", status="pending", celery_task_id="task-abc"
+    )
+    db_session.add(report)
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.celery_app") as mock_celery_app:
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/reports/{report.report_id}/cancel")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "cancelled"
+    mock_celery_app.control.revoke.assert_called_once_with("task-abc", terminate=True)
+
+    db_session.refresh(report)
+    assert report.status == "cancelled"
+
+
+def test_cancel_campaign_report_rejects_already_completed_report(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.flush()
+    report = ReportHistory(campaign_id=campaign.campaign_id, file_path="/x.docx", format="docx", status="completed")
+    db_session.add(report)
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/reports/{report.report_id}/cancel")
+
+    assert response.status_code == 400
+    db_session.refresh(report)
+    assert report.status == "completed"
+
+
+def test_cancel_campaign_report_returns_404_for_unknown_report(app_client, admin_user, db_session):
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id)
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/reports/{uuid.uuid4()}/cancel")
+
+    assert response.status_code == 404
 
 
 def test_get_campaign_report_status_returns_report_row(app_client, admin_user, db_session):

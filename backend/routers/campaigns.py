@@ -24,6 +24,7 @@ from backend.models import (
     User,
 )
 from backend.workers.campaign_tasks import crawl_campaign_source_once, generate_campaign_report, mark_crawl_done
+from backend.workers.celery_app import celery_app
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -438,18 +439,53 @@ def create_campaign_report(
     if payload.format not in _VALID_REPORT_FORMATS:
         raise HTTPException(status_code=400, detail=f"format phải là 1 trong {_VALID_REPORT_FORMATS}")
 
+    # Sinh task_id TRƯỚC khi gọi apply_async (không suy ra từ report_id) — cần lưu lại để
+    # revoke được task thật khi người dùng bấm Hủy (POST .../reports/{report_id}/cancel)
+    task_id = str(uuid.uuid4())
     report = ReportHistory(
         campaign_id=campaign.campaign_id,
         file_path="",
         format=payload.format,
         status="pending",
+        celery_task_id=task_id,
     )
     db.add(report)
     db.commit()
 
-    generate_campaign_report.delay(
-        str(report.report_id), str(campaign.campaign_id), payload.date_from, payload.date_to, payload.format
+    generate_campaign_report.apply_async(
+        args=[str(report.report_id), str(campaign.campaign_id), payload.date_from, payload.date_to, payload.format],
+        task_id=task_id,
     )
+
+    return {"report_id": str(report.report_id), "status": report.status}
+
+
+_CANCELABLE_REPORT_STATUSES = {"pending", "running"}
+
+
+@router.post("/{campaign_id}/reports/{report_id}/cancel")
+def cancel_campaign_report(
+    campaign_id: str,
+    report_id: str,
+    db: Session = Depends(get_db),
+    _user: User = Depends(require_permission("report", "create")),
+):
+    _get_campaign_or_404(db, campaign_id)
+    report = _get_campaign_report_or_404(db, campaign_id, report_id)
+
+    if report.status not in _CANCELABLE_REPORT_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Không thể hủy báo cáo đang ở trạng thái {report.status}",
+        )
+
+    # Task bị kill bằng SIGTERM (không phải Python exception) nên tự nó không cập nhật
+    # được status — endpoint tự set, giống cơ chế Hủy Job cũ (đã xóa cùng bảng jobs ở
+    # Phase 7, xem rule 10-error-handling.md)
+    if report.celery_task_id:
+        celery_app.control.revoke(report.celery_task_id, terminate=True)
+    report.status = "cancelled"
+    db.commit()
 
     return {"report_id": str(report.report_id), "status": report.status}
 

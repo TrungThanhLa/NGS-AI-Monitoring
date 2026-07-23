@@ -16,4 +16,5 @@ class ReportHistory(Base):
     file_path = Column(Text, nullable=False)
     status = Column(String(20), server_default="completed")
     error_log = Column(Text)
+    celery_task_id = Column(String(255))
     created_at = Column(TIMESTAMP, server_default=func.now())
