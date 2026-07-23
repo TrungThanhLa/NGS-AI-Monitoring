@@ -304,6 +304,24 @@ CREATE TABLE crawl_queue (
 );
 ```
 
+## Nhóm: Tiến độ crawl Campaign ONE_SHOT — `campaign_crawl_progress` `[ĐÃ CODE — 2026-07-23, migration 0022]`
+
+> Theo dõi tiến độ crawl từng Nguồn của 1 Campaign `mode=ONE_SHOT` (Discover xong bao nhiêu URL, đã fetch/tái sử dụng xong bao nhiêu) — FE đọc qua `GET /api/campaigns/{id}/crawl-progress` để hiển thị progress bar thay vì chỉ thấy `status=ACTIVE` chung chung. Chỉ dùng cho ONE_SHOT — CONTINUOUS tính tiến độ trực tiếp từ `sources`/`crawl_queue`/`campaign_articles`, không cần bảng này. Cơ chế ghi: xem [17 · Continuous Crawler & Scheduler](17-continuous-crawler-scheduler.md).
+
+```sql
+CREATE TABLE campaign_crawl_progress (
+    campaign_id UUID REFERENCES campaigns(campaign_id) ON DELETE RESTRICT,
+    source_id   UUID REFERENCES sources(source_id) ON DELETE RESTRICT,
+    total_urls  INTEGER,               -- NULL cho tới khi Discover xong
+    done_urls   INTEGER DEFAULT 0,
+    status      VARCHAR(20) DEFAULT 'pending',  -- pending|discovering|fetching|done|error
+    updated_at  TIMESTAMP DEFAULT NOW(),
+    PRIMARY KEY (campaign_id, source_id)
+);
+```
+
+Kích hoạt lại 1 Campaign ONE_SHOT sau khi Pause giữa chừng: dòng cũ theo `(campaign_id, source_id)` bị xóa và tạo lại (không cộng dồn/ghi đè từng phần) — tránh vi phạm PRIMARY KEY.
+
 ---
 
 ## Nhóm: Báo cáo — `report_history` `[ĐÃ CODE, SẼ SỬA]`

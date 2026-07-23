@@ -136,9 +136,53 @@ PUT    /api/campaigns/{id}
 DELETE /api/campaigns/{id}                 (xóa mềm → chuyển ARCHIVED)
 POST   /api/campaigns/{id}/activate
 POST   /api/campaigns/{id}/pause
+GET    /api/campaigns/{id}/crawl-progress  # [ĐÃ CODE — 2026-07-23] permission campaign.view
 ```
 
 `POST /api/reports/create` bị **xóa**, thay bằng `POST /api/campaigns` kèm `mode=ONE_SHOT`. Chi tiết: xem [16 · Campaign Management](16-campaign-management.md).
+
+### GET /api/campaigns/{id}/crawl-progress — Response
+
+Nội dung khác nhau theo `mode` của Campaign — xem [17 · Continuous Crawler & Scheduler](17-continuous-crawler-scheduler.md).
+
+**`mode=ONE_SHOT`** — đọc từ bảng `campaign_crawl_progress`:
+```json
+{
+  "mode": "ONE_SHOT",
+  "sources": [
+    {
+      "source_id": "uuid",
+      "source_name": "VTV News",
+      "total_urls": 42,
+      "done_urls": 17,
+      "status": "fetching"
+    }
+  ],
+  "overall_percent": 40.5
+}
+```
+- `total_urls` là `null` cho tới khi Discover xong (chưa biết tổng số URL)
+- `status` một trong `pending|discovering|fetching|done|error`
+- `overall_percent = round(100 * sum(done_urls) / sum(total_urls), 1)`, trả `0.0` nếu `total_urls` toàn `null`/tổng bằng 0
+
+**`mode=CONTINUOUS`** — tính trực tiếp từ `sources`/`crawl_queue`/`campaign_articles`, không qua `campaign_crawl_progress`:
+```json
+{
+  "mode": "CONTINUOUS",
+  "sources": [
+    {
+      "source_id": "uuid",
+      "source_name": "VTV News",
+      "last_crawled_at": "2026-07-23T08:00:00Z",
+      "source_status": "ACTIVE",
+      "pending_count": 3,
+      "matched_last_24h": 5
+    }
+  ]
+}
+```
+- `pending_count`: số URL của Nguồn còn `status='pending'` trong `crawl_queue`
+- `matched_last_24h`: số `campaign_articles` của Campaign này khớp trong 24 giờ gần nhất (`matched_at >= now() - 24h`)
 
 ## Content (Nội dung) — `[CHƯA CODE]`
 
