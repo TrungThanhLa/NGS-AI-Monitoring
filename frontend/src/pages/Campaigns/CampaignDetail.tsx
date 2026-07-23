@@ -123,6 +123,13 @@ export default function CampaignDetail() {
 
   if (!campaign) return <LoadingState />
 
+  // Chặn spam "Tạo báo cáo": còn 1 report của campaign này đang pending/running (backend
+  // chưa xử lý xong) thì không cho bấm tạo thêm — tránh sinh hàng loạt report trùng
+  // date_range/format trong lúc đợi report trước hoàn tất (creatingReport chỉ chặn được
+  // đúng khoảnh khắc gọi request, không chặn được việc bấm lại ngay khi request đã xong
+  // nhưng report vẫn còn đang chạy nền)
+  const hasActiveReport = reports.some((r) => r.status === 'pending' || r.status === 'running')
+
   async function handleActivate() {
     const res = await authFetch(`/api/campaigns/${id}/activate`, { method: 'POST' })
     if (!res.ok) {
@@ -262,9 +269,17 @@ export default function CampaignDetail() {
           />
           <Select value={reportFormat} onChange={setReportFormat} options={FORMAT_OPTIONS} style={{ width: 180 }} />
           <PermissionGuard permission="report.create">
-            <Button type="primary" icon={<PlusOutlined />} loading={creatingReport} disabled={!reportRange} onClick={handleCreateReport}>
-              Tạo báo cáo
-            </Button>
+            <Tooltip title={hasActiveReport ? 'Đang có báo cáo khác xử lý — đợi xong rồi tạo tiếp' : undefined}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                loading={creatingReport}
+                disabled={!reportRange || hasActiveReport}
+                onClick={handleCreateReport}
+              >
+                Tạo báo cáo
+              </Button>
+            </Tooltip>
           </PermissionGuard>
         </Space>
 
