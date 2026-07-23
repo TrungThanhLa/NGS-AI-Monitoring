@@ -1,5 +1,5 @@
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -828,3 +828,55 @@ def test_crawl_progress_continuous_returns_source_activity(app_client, admin_use
     assert body["mode"] == "CONTINUOUS"
     assert body["sources"][0]["pending_count"] == 1
     assert body["sources"][0]["matched_last_24h"] == 1
+
+
+def test_create_continuous_campaign_rejects_start_date_older_than_180_days(app_client, admin_user):
+    too_old = (date.today() - timedelta(days=200)).isoformat()
+    response = app_client.post(
+        "/api/campaigns",
+        json={"name": "C", "owner_id": str(admin_user.user_id), "start_date": too_old, "mode": "CONTINUOUS"},
+    )
+    assert response.status_code == 400
+    assert "180" in response.json()["detail"]
+
+
+def test_create_continuous_campaign_accepts_start_date_within_180_days(app_client, admin_user):
+    ok_date = (date.today() - timedelta(days=170)).isoformat()
+    response = app_client.post(
+        "/api/campaigns",
+        json={"name": "C", "owner_id": str(admin_user.user_id), "start_date": ok_date, "mode": "CONTINUOUS"},
+    )
+    assert response.status_code == 201
+
+
+def test_update_campaign_to_continuous_with_old_start_date_rejected(app_client, admin_user, db_session):
+    too_old = date.today() - timedelta(days=200)
+    campaign = Campaign(
+        name="C", start_date=too_old, end_date=too_old, status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.commit()
+
+    response = app_client.put(f"/api/campaigns/{campaign.campaign_id}", json={"mode": "CONTINUOUS"})
+
+    assert response.status_code == 400
+    assert "180" in response.json()["detail"]
+
+
+def test_activate_continuous_campaign_with_old_start_date_rejected(app_client, admin_user, source, keyword, db_session):
+    # Campaign cũ tạo trước khi có validate này (ORM thẳng, bỏ qua create endpoint) —
+    # activate vẫn phải chặn (defense-in-depth, đúng pattern _validate_one_shot_date_range)
+    too_old = date.today() - timedelta(days=200)
+    campaign = Campaign(
+        name="C", start_date=too_old, status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 400
+    assert "180" in response.json()["detail"]

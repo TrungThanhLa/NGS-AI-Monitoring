@@ -66,6 +66,33 @@ def _validate_one_shot_date_range(mode: str, end_date_value) -> None:
         )
 
 
+_MAX_CONTINUOUS_START_DATE_DAYS = 180
+
+
+def _validate_continuous_start_date(mode: str, start_date_value) -> None:
+    """BR-CAMP mới (2026-07-23): CONTINUOUS chỉ chấp nhận start_date trong vòng
+    _MAX_CONTINUOUS_START_DATE_DAYS ngày trước hôm nay — Discover backfill bị cap cùng
+    ngưỡng này (continuous_crawl.py _MAX_CONTINUOUS_BACKFILL_DAYS, giá trị trùng 180
+    nhưng KHÔNG chia sẻ qua import, tránh phụ thuộc chéo router/worker không cần thiết).
+    Chặn cứng ở đây để người dùng biết ngay giới hạn, không bị cap ngầm lúc backfill."""
+    if mode != "CONTINUOUS":
+        return
+    if start_date_value is None:
+        return  # start_date bắt buộc đã validate riêng ở BR-CAMP-01, không lặp lại ở đây
+    if isinstance(start_date_value, str):
+        parsed = date.fromisoformat(start_date_value)
+    elif isinstance(start_date_value, datetime):
+        parsed = start_date_value.date()
+    else:
+        parsed = start_date_value
+    floor = date.today() - timedelta(days=_MAX_CONTINUOUS_START_DATE_DAYS)
+    if parsed < floor:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Chiến dịch giám sát liên tục (CONTINUOUS) chỉ chấp nhận Ngày bắt đầu trong vòng {_MAX_CONTINUOUS_START_DATE_DAYS} ngày trước hôm nay",
+        )
+
+
 def _campaign_source_ids(db: Session, campaign_id) -> list[str]:
     rows = db.query(CampaignSource.source_id).filter_by(campaign_id=campaign_id).all()
     return [str(r[0]) for r in rows]
@@ -163,6 +190,7 @@ def create_campaign(
     if payload.mode not in _VALID_MODES:
         raise HTTPException(status_code=400, detail=f"mode phải là 1 trong {_VALID_MODES}")
     _validate_one_shot_date_range(payload.mode, payload.end_date)
+    _validate_continuous_start_date(payload.mode, payload.start_date)
 
     sources = _resolve_sources(db, payload.source_ids)
     kws = _resolve_keywords(db, payload.keyword_ids)
@@ -280,6 +308,7 @@ def update_campaign(
         campaign.alert_threshold = payload.alert_threshold
 
     _validate_one_shot_date_range(campaign.mode, campaign.end_date)
+    _validate_continuous_start_date(campaign.mode, campaign.start_date)
 
     if payload.source_ids is not None:
         sources = _resolve_sources(db, payload.source_ids)
@@ -353,6 +382,7 @@ def activate_campaign(
             detail=f"Không thể kích hoạt chiến dịch đang ở trạng thái {campaign.status}",
         )
     _validate_one_shot_date_range(campaign.mode, campaign.end_date)
+    _validate_continuous_start_date(campaign.mode, campaign.start_date)
 
     # BR-CAMP-03: chỉ chuyển ACTIVE khi có >=1 nguồn VÀ >=1 từ khóa
     has_source = db.query(CampaignSource).filter_by(campaign_id=campaign.campaign_id).first() is not None
