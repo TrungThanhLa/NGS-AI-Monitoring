@@ -515,3 +515,165 @@ def test_crawl_task_swallows_discover_exception_so_chord_callback_still_fires(db
     # .run() chạy đồng bộ, không qua Celery broker — nếu implementation vẫn để lỗi raise,
     # dòng dưới sẽ raise RuntimeError và test fail đúng như mong đợi khi bug còn tồn tại.
     crawl_task.run(str(source.source_id))
+
+
+from datetime import timedelta
+from backend.workers.continuous_crawl import _compute_required_floor
+
+
+def _make_continuous_campaign(db_session, start_date, status="ACTIVE"):
+    campaign = Campaign(name=f"C-{uuid.uuid4()}", start_date=start_date, status=status, mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.flush()
+    return campaign
+
+
+def test_compute_required_floor_returns_earliest_active_campaign_start_date(db_session):
+    source = Source(name="RF1", domain=f"rf1-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.flush()
+    today = date(2026, 7, 23)
+    campaign_a = _make_continuous_campaign(db_session, date(2026, 6, 1))  # 52 ngày trước
+    campaign_b = _make_continuous_campaign(db_session, date(2026, 7, 13))  # 10 ngày trước
+    db_session.add(CampaignSource(campaign_id=campaign_a.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignSource(campaign_id=campaign_b.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    floor = _compute_required_floor(db_session, source, today)
+
+    assert floor == date(2026, 6, 1)  # mốc xa nhất (A), không phải B
+
+
+def test_compute_required_floor_ignores_paused_campaign(db_session):
+    source = Source(name="RF2", domain=f"rf2-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.flush()
+    today = date(2026, 7, 23)
+    campaign_a = _make_continuous_campaign(db_session, date(2026, 6, 1), status="PAUSED")
+    campaign_b = _make_continuous_campaign(db_session, date(2026, 7, 13), status="ACTIVE")
+    db_session.add(CampaignSource(campaign_id=campaign_a.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignSource(campaign_id=campaign_b.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    floor = _compute_required_floor(db_session, source, today)
+
+    assert floor == date(2026, 7, 13)  # A đang PAUSED, không tính
+
+
+def test_compute_required_floor_caps_at_180_days(db_session):
+    source = Source(name="RF3", domain=f"rf3-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.flush()
+    today = date(2026, 7, 23)
+    campaign = _make_continuous_campaign(db_session, date(2025, 1, 1))  # rất xa, quá 180 ngày
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    floor = _compute_required_floor(db_session, source, today)
+
+    assert floor == today - timedelta(days=180)
+
+
+def test_compute_required_floor_defaults_to_incremental_when_no_campaign_active(db_session):
+    source = Source(name="RF4", domain=f"rf4-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.commit()
+    today = date(2026, 7, 23)
+
+    floor = _compute_required_floor(db_session, source, today)
+
+    assert floor == today - timedelta(days=5)  # _INCREMENTAL_LOOKBACK_DAYS
+
+
+def test_discover_source_urls_uses_required_floor_when_backfill_needed(db_session, monkeypatch):
+    source = Source(name="D1", domain=f"d1-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.flush()
+    campaign = _make_continuous_campaign(db_session, date(2026, 6, 1))
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    captured = {}
+
+    def fake_get_candidates(src, date_from, date_to):
+        captured["date_from"] = date_from
+        return [], []
+
+    monkeypatch.setattr("backend.workers.continuous_crawl._get_candidates", fake_get_candidates)
+
+    discover_source_urls(db_session, source, today=date(2026, 7, 23))
+
+    assert captured["date_from"] == date(2026, 6, 1)  # backfill đúng tới start_date Campaign
+    db_session.refresh(source)
+    assert source.discover_backfilled_from.date() == date(2026, 6, 1)
+
+
+def test_discover_source_urls_uses_incremental_window_when_already_backfilled(db_session, monkeypatch):
+    source = Source(
+        name="D2", domain=f"d2-{uuid.uuid4()}.example", group_name="G", is_active=True,
+        discover_backfilled_from=date(2026, 6, 1),
+    )
+    db_session.add(source)
+    db_session.flush()
+    campaign = _make_continuous_campaign(db_session, date(2026, 7, 13))  # gần hơn mốc đã backfill
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    captured = {}
+
+    def fake_get_candidates(src, date_from, date_to):
+        captured["date_from"] = date_from
+        return [], []
+
+    monkeypatch.setattr("backend.workers.continuous_crawl._get_candidates", fake_get_candidates)
+
+    discover_source_urls(db_session, source, today=date(2026, 7, 23))
+
+    assert captured["date_from"] == date(2026, 7, 18)  # incremental 5 ngày, KHÔNG backfill lại
+    db_session.refresh(source)
+    assert source.discover_backfilled_from.date() == date(2026, 6, 1)  # mốc cũ giữ nguyên
+
+
+def test_discover_source_urls_does_not_narrow_backfilled_from_after_campaign_leaves(db_session, monkeypatch):
+    # Tái hiện đúng quyết định đã chốt: mốc backfill KHÔNG bao giờ co lại (nới gần hơn
+    # hiện tại) dù Campaign từng cần mốc sâu nhất đã rời đi (Pause/Archive) — chạy 2 lượt
+    # discover liên tiếp: lượt 1 backfill sâu (còn Campaign xa), lượt 2 Campaign đó đã
+    # PAUSED (chỉ còn Campaign gần) — mốc phải giữ nguyên từ lượt 1
+    source = Source(name="D3", domain=f"d3-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.flush()
+    campaign_far = _make_continuous_campaign(db_session, date(2026, 6, 1))
+    campaign_near = _make_continuous_campaign(db_session, date(2026, 7, 13))
+    db_session.add(CampaignSource(campaign_id=campaign_far.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignSource(campaign_id=campaign_near.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    monkeypatch.setattr("backend.workers.continuous_crawl._get_candidates", lambda src, date_from, date_to: ([], []))
+
+    discover_source_urls(db_session, source, today=date(2026, 7, 23))
+    db_session.refresh(source)
+    assert source.discover_backfilled_from.date() == date(2026, 6, 1)
+
+    campaign_far.status = "PAUSED"
+    db_session.commit()
+
+    discover_source_urls(db_session, source, today=date(2026, 7, 24))
+    db_session.refresh(source)
+    assert source.discover_backfilled_from.date() == date(2026, 6, 1)  # KHÔNG co lại về 2026-07-19
+
+
+def test_discover_source_urls_updates_backfilled_from_even_when_no_candidates(db_session, monkeypatch):
+    source = Source(name="D4", domain=f"d4-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    db_session.add(source)
+    db_session.flush()
+    campaign = _make_continuous_campaign(db_session, date(2026, 6, 1))
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    monkeypatch.setattr("backend.workers.continuous_crawl._get_candidates", lambda src, date_from, date_to: ([], []))
+
+    inserted = discover_source_urls(db_session, source, today=date(2026, 7, 23))
+
+    assert inserted == 0
+    db_session.refresh(source)
+    assert source.discover_backfilled_from.date() == date(2026, 6, 1)  # vẫn cập nhật dù 0 candidate

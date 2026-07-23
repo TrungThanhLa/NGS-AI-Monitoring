@@ -3,6 +3,7 @@ import os
 import time
 from datetime import date, datetime, timedelta, timezone
 
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 
@@ -24,15 +25,41 @@ from backend.models import (
 
 logger = logging.getLogger(__name__)
 
-# Discover không giới hạn CỨNG theo date_from/date_to như Job on-demand — nhưng KHÔNG
-# quét từ "vô hạn trong quá khứ" (đã thử date(2000,1,1) và phát hiện bug thật: với
-# nguồn dùng _SITEMAP_URL_TEMPLATES sinh 1 URL sub-sitemap/tháng — VD vtv.vn — quét từ
-# năm 2000 tạo ra ~300+ request HTTP mỗi chu kỳ, vi phạm nguyên tắc "không spam
-# request" và có nguy cơ bị chặn IP — xem CLAUDE.md, phát hiện lúc smoke test thật
-# 2026-07-21). Dùng cửa sổ trượt (rolling window) N ngày gần nhất tính từ `today` —
-# đủ rộng để không bỏ lỡ bài nếu 1 chu kỳ bị gián đoạn vài ngày liên tiếp, chống
-# trùng đã có crawl_queue lo (ON CONFLICT DO NOTHING).
-_DISCOVER_LOOKBACK_DAYS = 30
+# [SỬA 2026-07-23] Trước đây Discover luôn dùng cửa sổ trượt 30 ngày cố định tính từ
+# `today`, không quan tâm start_date của Campaign nào — bài đăng trước cửa sổ này
+# không bao giờ được match (match_campaigns_for_article chỉ chạy trên bài MỚI fetch,
+# không hồi tố). Giờ Discover tính động: hợp (union) start_date của mọi Campaign
+# CONTINUOUS ACTIVE đang theo dõi Nguồn này (xem _compute_required_floor), cap tối đa
+# _MAX_CONTINUOUS_BACKFILL_DAYS ngày (lưới an toàn thứ 2, dù đã chặn cứng lúc tạo/kích
+# hoạt Campaign — xem routers/campaigns.py _validate_continuous_start_date). Khi không
+# cần backfill (đã quét đủ xa từ trước, xem sources.discover_backfilled_from), dùng
+# cửa sổ hẹp _INCREMENTAL_LOOKBACK_DAYS ngày — giữ tinh thần "tự phục hồi nếu Beat gián
+# đoạn vài ngày" của cửa sổ 30 ngày gốc (Phase 3), chỉ thu hẹp vì phần "phủ xa theo
+# Campaign" đã tách thành cơ chế backfill riêng.
+_INCREMENTAL_LOOKBACK_DAYS = 5
+_MAX_CONTINUOUS_BACKFILL_DAYS = 180
+
+
+def _compute_required_floor(db, source: Source, today: date) -> date:
+    """MIN(start_date) trong số Campaign CONTINUOUS đang ACTIVE theo dõi Nguồn này, cap
+    tối đa _MAX_CONTINUOUS_BACKFILL_DAYS ngày trước `today`. Nếu không có Campaign nào
+    (trường hợp hiếm — crawl_task chỉ được dispatch cho Nguồn đã qua list_due_sources,
+    tức đã có ít nhất 1 Campaign ACTIVE), trả về cửa sổ incremental mặc định."""
+    earliest_start = (
+        db.query(func.min(Campaign.start_date))
+        .join(CampaignSource, CampaignSource.campaign_id == Campaign.campaign_id)
+        .filter(
+            CampaignSource.source_id == source.source_id,
+            Campaign.status == "ACTIVE",
+            Campaign.mode == "CONTINUOUS",
+        )
+        .scalar()
+    )
+    if earliest_start is None:
+        return today - timedelta(days=_INCREMENTAL_LOOKBACK_DAYS)
+    earliest_start_date = earliest_start.date() if isinstance(earliest_start, datetime) else earliest_start
+    floor_cap = today - timedelta(days=_MAX_CONTINUOUS_BACKFILL_DAYS)
+    return max(earliest_start_date, floor_cap)
 
 
 def _get_candidates(source, date_from, date_to) -> tuple[list[dict], list[str]]:
@@ -52,28 +79,55 @@ def discover_source_urls(db, source: Source, today: date | None = None) -> int:
     """Giai đoạn 1 (Discover): tìm URL ứng viên của nguồn (dùng _get_candidates ở trên
     — không đổi logic ưu tiên sitemap/listing), ghi vào crawl_queue. Trả về số URL MỚI
     vừa ghi (không tính URL đã có từ chu kỳ trước — ON CONFLICT DO NOTHING không ghi
-    đè trạng thái cũ)."""
+    đè trạng thái cũ).
+
+    [SỬA 2026-07-23] date_from giờ tính động theo _compute_required_floor thay vì cố
+    định _DISCOVER_LOOKBACK_DAYS — xem comment ở _compute_required_floor. Cập nhật
+    sources.discover_backfilled_from bằng UPDATE nguyên tử LEAST() SAU MỌI LƯỢT chạy
+    (kể cả khi 0 candidate) — vì "đã Discover xong tới date_from" là sự thật bất kể có
+    tìm thấy URL mới hay không; bỏ qua bước này sẽ khiến lượt sau lặp lại đúng backfill
+    tốn kém vừa chạy. UPDATE nguyên tử (không đọc-rồi-ghi qua ORM) để 2 crawl_task cùng
+    Nguồn chạy chồng lấn (race đã biết, từng gây bug thật ở fetch_pending_urls) không
+    ghi đè nhầm lẫn lên nhau — LEAST() luôn giữ giá trị nhỏ nhất (xa nhất về quá khứ)
+    dù 2 UPDATE chạy theo thứ tự nào."""
     today = today or date.today()
-    date_from = today - timedelta(days=_DISCOVER_LOOKBACK_DAYS)
+    backfilled_from = source.discover_backfilled_from
+    backfilled_from_date = backfilled_from.date() if isinstance(backfilled_from, datetime) and backfilled_from else backfilled_from
+
+    required_floor = _compute_required_floor(db, source, today)
+    if backfilled_from_date is None or required_floor < backfilled_from_date:
+        date_from = required_floor
+    else:
+        date_from = today - timedelta(days=_INCREMENTAL_LOOKBACK_DAYS)
+
     candidates, _failed_locs = _get_candidates(source, date_from, today)
 
-    if not candidates:
-        return 0
+    inserted = 0
+    if candidates:
+        rows = [
+            {
+                "source_id": source.source_id,
+                "url": c["url"],
+                "url_hash": compute_url_hash(c["url"]),
+                "status": "pending",
+            }
+            for c in candidates
+        ]
+        stmt = pg_insert(CrawlQueue).values(rows)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["source_id", "url_hash"])
+        result = db.execute(stmt)
+        inserted = result.rowcount
 
-    rows = [
-        {
-            "source_id": source.source_id,
-            "url": c["url"],
-            "url_hash": compute_url_hash(c["url"]),
-            "status": "pending",
-        }
-        for c in candidates
-    ]
-    stmt = pg_insert(CrawlQueue).values(rows)
-    stmt = stmt.on_conflict_do_nothing(index_elements=["source_id", "url_hash"])
-    result = db.execute(stmt)
+    db.execute(
+        text(
+            "UPDATE sources "
+            "SET discover_backfilled_from = LEAST(COALESCE(discover_backfilled_from, :date_from), :date_from) "
+            "WHERE source_id = :source_id"
+        ),
+        {"date_from": date_from, "source_id": source.source_id},
+    )
     db.commit()
-    return result.rowcount
+    return inserted
 
 
 _CONSECUTIVE_ERROR_LIMIT = 10  # BR-SRC-03 — ngưỡng khởi điểm, chưa dựa trên dữ liệu vận hành thật
