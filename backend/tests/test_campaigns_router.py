@@ -491,7 +491,7 @@ def test_activate_one_shot_campaign_creates_progress_rows(app_client, admin_user
     assert progress.status == "pending"
 
 
-def test_activate_one_shot_campaign_after_pause_overwrites_stale_progress(app_client, admin_user, source, keyword, db_session):
+def test_activate_one_shot_campaign_after_pause_does_not_crash(app_client, admin_user, source, keyword, db_session):
     # Tái hiện bug thật: activate ONE_SHOT -> pause giữa chừng -> activate lại từng bị 500
     # (IntegrityError trùng PRIMARY KEY (campaign_id, source_id) của campaign_crawl_progress)
     # vì code cũ luôn INSERT mà không xóa dòng tiến độ cũ trước đó.
@@ -509,13 +509,13 @@ def test_activate_one_shot_campaign_after_pause_overwrites_stale_progress(app_cl
         first_response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
     assert first_response.status_code == 200
 
-    # Giả lập crawl đã chạy xong 1 lượt trước đó
+    # Giả lập crawl CHƯA xong (còn dở, VD đang discovering) lúc bị Pause
     progress = db_session.query(CampaignCrawlProgress).filter_by(
         campaign_id=campaign.campaign_id, source_id=source.source_id
     ).one()
-    progress.total_urls = 5
-    progress.done_urls = 5
-    progress.status = "done"
+    progress.total_urls = None
+    progress.done_urls = 0
+    progress.status = "discovering"
     db_session.commit()
 
     pause_response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/pause")
@@ -527,13 +527,90 @@ def test_activate_one_shot_campaign_after_pause_overwrites_stale_progress(app_cl
 
     assert reactivate_response.status_code == 200
     assert reactivate_response.json()["status"] == "ACTIVE"
+    mock_chord.assert_called_once()
 
+    # Nguồn CHƯA done -> dòng tiến độ cũ bị xóa, tạo lại mới (reset), vì không có cách
+    # nào "tiếp tục" đúng chỗ dở dang (Discover không lưu trạng thái từng phần)
     refreshed = db_session.query(CampaignCrawlProgress).filter_by(
         campaign_id=campaign.campaign_id, source_id=source.source_id
     ).one()
     assert refreshed.total_urls is None
     assert refreshed.done_urls == 0
     assert refreshed.status == "pending"
+
+
+def test_activate_one_shot_campaign_skips_sources_already_done(app_client, admin_user, source, keyword, db_session):
+    # Nguồn đã done từ lượt trước -> kích hoạt lại KHÔNG được đụng vào (không xóa, không
+    # đưa vào chord crawl lại) — tránh lãng phí Discover + matching lại 1 lượt vô ích
+    # (phát hiện qua smoke test thật 2026-07-23, VD VTV News 320/320 done bị crawl lại
+    # oan mỗi lần Tạm dừng/Kích hoạt lại)
+    other_source = Source(name="Other", domain=f"other-{uuid.uuid4()}.example", group_name="G")
+    db_session.add(other_source)
+    db_session.flush()
+
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=other_source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.add(
+        CampaignCrawlProgress(
+            campaign_id=campaign.campaign_id, source_id=source.source_id,
+            total_urls=320, done_urls=320, status="done",
+        )
+    )
+    db_session.commit()
+    campaign.status = "PAUSED"
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        mock_chord.return_value.return_value = MagicMock()
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ACTIVE"
+    mock_chord.assert_called_once()
+    # Verify qua kết quả DB (đáng tin cậy hơn suy luận args nội bộ generator đã truyền cho mock):
+    done_progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert done_progress.total_urls == 320
+    assert done_progress.done_urls == 320
+    assert done_progress.status == "done"  # không bị đụng vào
+
+    other_progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=other_source.source_id
+    ).one()
+    assert other_progress.status == "pending"  # dòng mới tạo cho Nguồn chưa done
+
+
+def test_activate_one_shot_campaign_completes_immediately_when_all_sources_already_done(
+    app_client, admin_user, source, keyword, db_session
+):
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="PAUSED", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.add(
+        CampaignCrawlProgress(
+            campaign_id=campaign.campaign_id, source_id=source.source_id,
+            total_urls=10, done_urls=10, status="done",
+        )
+    )
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "COMPLETED"
+    mock_chord.assert_not_called()
 
 
 def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_user, source, keyword, db_session):

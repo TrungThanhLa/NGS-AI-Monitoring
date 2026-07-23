@@ -382,20 +382,50 @@ def activate_campaign(
     # song song, callback mark_crawl_done chỉ chạy SAU KHI TẤT CẢ đã xong.
     if campaign.mode == "ONE_SHOT":
         source_ids = _campaign_source_ids(db, campaign.campaign_id)
-        # Xóa tiến độ crawl cũ trước khi tạo mới — cho phép kích hoạt lại (VD sau khi Pause
-        # giữa chừng) mà không vi phạm PRIMARY KEY (campaign_id, source_id) của
-        # campaign_crawl_progress (xem finding review "pause rồi activate lại ONE_SHOT")
-        db.query(CampaignCrawlProgress).filter_by(campaign_id=campaign.campaign_id).delete()
+        existing_progress = {
+            str(p.source_id): p
+            for p in db.query(CampaignCrawlProgress).filter_by(campaign_id=campaign.campaign_id).all()
+        }
+
+        # Kích hoạt lại (VD sau khi Pause giữa chừng): Nguồn nào đã done từ lượt trước thì
+        # GIỮ NGUYÊN, không xóa/crawl lại — Discover+matching lại 1 Nguồn đã xong hoàn toàn
+        # là lãng phí thuần túy (bài đã fetch được tái sử dụng, nhưng vẫn tốn request Discover
+        # + duyệt lại toàn bộ candidate + chạy matching lại), phát hiện qua smoke test thật
+        # 2026-07-23. Nguồn chưa done (pending/discovering/fetching/error) thì xóa dòng cũ,
+        # tạo lại mới — các Nguồn này KHÔNG có cơ chế resume dở dang (Discover không lưu
+        # trạng thái từng phần), chấp nhận restart từ đầu (quyết định đã chốt ở Task 4).
+        pending_source_ids = []
         for sid in source_ids:
+            prior = existing_progress.get(sid)
+            if prior is not None and prior.status == "done":
+                continue
+            if prior is not None:
+                db.delete(prior)
+            pending_source_ids.append(sid)
+        # Flush riêng DELETE trước khi ADD dòng mới cùng PRIMARY KEY (campaign_id, source_id)
+        # — db.delete() là thao tác ORM-tracked (khác bulk .query().delete()), nếu không
+        # flush trước, unit-of-work coi delete+add cùng identity là xung đột, giữ nguyên
+        # trạng thái object cũ thay vì tạo mới (bug thật phát hiện lúc viết test này)
+        db.flush()
+        for sid in pending_source_ids:
             db.add(CampaignCrawlProgress(campaign_id=campaign.campaign_id, source_id=uuid.UUID(sid)))
         db.commit()
 
-        date_from = campaign.start_date.date().isoformat()
-        date_to = campaign.end_date.date().isoformat()
-        chord(
-            (crawl_campaign_source_once.s(str(campaign.campaign_id), sid, date_from, date_to) for sid in source_ids),
-            mark_crawl_done.s(str(campaign.campaign_id)),
-        ).apply_async()
+        if pending_source_ids:
+            date_from = campaign.start_date.date().isoformat()
+            date_to = campaign.end_date.date().isoformat()
+            chord(
+                (
+                    crawl_campaign_source_once.s(str(campaign.campaign_id), sid, date_from, date_to)
+                    for sid in pending_source_ids
+                ),
+                mark_crawl_done.s(str(campaign.campaign_id)),
+            ).apply_async()
+        else:
+            # Mọi Nguồn đều đã done từ lượt trước — không còn gì để crawl, tự chuyển
+            # COMPLETED ngay, không cần dispatch Celery (chord với group rỗng không đáng tin cậy)
+            campaign.status = "COMPLETED"
+            db.commit()
 
     return _serialize_campaign(db, campaign)
 
