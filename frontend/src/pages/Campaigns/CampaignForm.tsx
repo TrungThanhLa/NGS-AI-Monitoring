@@ -1,4 +1,4 @@
-import { App, Button, Card, DatePicker, Form, Input, Radio, Select, Space } from 'antd'
+import { App, Button, Card, Col, DatePicker, Form, Input, Radio, Row, Select, Space } from 'antd'
 import { useNavigate, useParams } from 'react-router-dom'
 import PageHeader from '@/components/common/PageHeader'
 import { authFetch } from '@/lib/api'
@@ -116,29 +116,32 @@ export default function CampaignForm() {
             </Radio.Group>
           </Form.Item>
 
-          <Space style={{ width: '100%' }}>
-            <Form.Item name="start_date" label="Ngày bắt đầu" style={{ flex: 1 }} rules={[{ required: true, message: 'Bắt buộc' }]}>
-              <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
-            </Form.Item>
-            <Form.Item
-              name="end_date"
-              label="Ngày kết thúc"
-              style={{ flex: 1 }}
-              rules={[
-                {
-                  required: modeValue === 'ONE_SHOT',
-                  message: 'Chiến dịch "Tạo báo cáo nhanh" bắt buộc phải có Ngày kết thúc',
-                },
-              ]}
-              extra={modeValue === 'ONE_SHOT' ? 'Chỉ chọn được ngày trong quá khứ (đến hôm nay)' : undefined}
-            >
-              <DatePicker
-                style={{ width: '100%' }}
-                format="DD/MM/YYYY"
-                disabledDate={(d) => modeValue === 'ONE_SHOT' && d.isAfter(dayjs(), 'day')}
-              />
-            </Form.Item>
-          </Space>
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="start_date" label="Ngày bắt đầu" rules={[{ required: true, message: 'Bắt buộc' }]}>
+                <DatePicker style={{ width: '100%' }} format="DD/MM/YYYY" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="end_date"
+                label="Ngày kết thúc"
+                rules={[
+                  {
+                    required: modeValue === 'ONE_SHOT',
+                    message: 'Chiến dịch "Tạo báo cáo nhanh" bắt buộc phải có Ngày kết thúc',
+                  },
+                ]}
+                extra={modeValue === 'ONE_SHOT' ? 'Chỉ chọn được ngày trong quá khứ (đến hôm nay)' : undefined}
+              >
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format="DD/MM/YYYY"
+                  disabledDate={(d) => modeValue === 'ONE_SHOT' && d.isAfter(dayjs(), 'day')}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item name="source_ids" label="Nguồn dữ liệu" extra="Cần ít nhất 1 nguồn để kích hoạt (BR-CAMP-03)">
             <Select

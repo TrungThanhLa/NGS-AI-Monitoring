@@ -107,10 +107,17 @@ export default function CampaignDetail() {
     return () => clearInterval(interval)
   }, [reports])
 
-  // Poll tiến độ crawl mỗi 3s khi Campaign đang ACTIVE — dừng khi COMPLETED/PAUSED/ARCHIVED
+  // Poll tiến độ crawl VÀ trạng thái Campaign mỗi 3s khi đang ACTIVE — dừng khi
+  // COMPLETED/PAUSED/ARCHIVED. Phải poll cả loadCampaign() ở đây (không chỉ
+  // loadCrawlProgress()) — nếu không, sau khi crawl xong (chord callback chuyển
+  // campaign.status=COMPLETED phía backend), UI vẫn đứng yên với nút "Tạm dừng" hiển
+  // thị sai trên 1 Campaign thực ra đã COMPLETED, cho tới khi người dùng tự F5.
   useEffect(() => {
     if (campaign?.status !== 'ACTIVE') return
-    const interval = setInterval(loadCrawlProgress, 3000)
+    const interval = setInterval(() => {
+      loadCrawlProgress()
+      loadCampaign()
+    }, 3000)
     return () => clearInterval(interval)
   }, [campaign?.status])
 
@@ -246,6 +253,12 @@ export default function CampaignDetail() {
             value={reportRange}
             onChange={(v) => setReportRange(v as [Dayjs, Dayjs] | null)}
             format="DD/MM/YYYY"
+            disabledDate={(current) => {
+              if (!current) return false
+              if (current.isBefore(dayjs(campaign.start_date), 'day')) return true
+              if (campaign.end_date && current.isAfter(dayjs(campaign.end_date), 'day')) return true
+              return false
+            }}
           />
           <Select value={reportFormat} onChange={setReportFormat} options={FORMAT_OPTIONS} style={{ width: 180 }} />
           <PermissionGuard permission="report.create">
