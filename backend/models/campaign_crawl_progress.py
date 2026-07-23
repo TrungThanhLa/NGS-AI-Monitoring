@@ -13,4 +13,4 @@ class CampaignCrawlProgress(Base):
     total_urls = Column(Integer)
     done_urls = Column(Integer, server_default="0")
     status = Column(String(20), server_default="pending")
-    updated_at = Column(TIMESTAMP, server_default=func.now())
+    updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())

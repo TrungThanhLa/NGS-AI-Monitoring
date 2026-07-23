@@ -381,6 +381,10 @@ def activate_campaign(
     # song song, callback mark_crawl_done chỉ chạy SAU KHI TẤT CẢ đã xong.
     if campaign.mode == "ONE_SHOT":
         source_ids = _campaign_source_ids(db, campaign.campaign_id)
+        # Xóa tiến độ crawl cũ trước khi tạo mới — cho phép kích hoạt lại (VD sau khi Pause
+        # giữa chừng) mà không vi phạm PRIMARY KEY (campaign_id, source_id) của
+        # campaign_crawl_progress (xem finding review "pause rồi activate lại ONE_SHOT")
+        db.query(CampaignCrawlProgress).filter_by(campaign_id=campaign.campaign_id).delete()
         for sid in source_ids:
             db.add(CampaignCrawlProgress(campaign_id=campaign.campaign_id, source_id=uuid.UUID(sid)))
         db.commit()

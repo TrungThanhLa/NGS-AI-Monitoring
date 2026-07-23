@@ -444,6 +444,51 @@ def test_activate_one_shot_campaign_creates_progress_rows(app_client, admin_user
     assert progress.status == "pending"
 
 
+def test_activate_one_shot_campaign_after_pause_overwrites_stale_progress(app_client, admin_user, source, keyword, db_session):
+    # Tái hiện bug thật: activate ONE_SHOT -> pause giữa chừng -> activate lại từng bị 500
+    # (IntegrityError trùng PRIMARY KEY (campaign_id, source_id) của campaign_crawl_progress)
+    # vì code cũ luôn INSERT mà không xóa dòng tiến độ cũ trước đó.
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", end_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="ONE_SHOT"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignKeyword(campaign_id=campaign.campaign_id, keyword_id=keyword.keyword_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        mock_chord.return_value.return_value = MagicMock()
+        first_response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+    assert first_response.status_code == 200
+
+    # Giả lập crawl đã chạy xong 1 lượt trước đó
+    progress = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    progress.total_urls = 5
+    progress.done_urls = 5
+    progress.status = "done"
+    db_session.commit()
+
+    pause_response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/pause")
+    assert pause_response.status_code == 200
+
+    with patch("backend.routers.campaigns.chord") as mock_chord:
+        mock_chord.return_value.return_value = MagicMock()
+        reactivate_response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/activate")
+
+    assert reactivate_response.status_code == 200
+    assert reactivate_response.json()["status"] == "ACTIVE"
+
+    refreshed = db_session.query(CampaignCrawlProgress).filter_by(
+        campaign_id=campaign.campaign_id, source_id=source.source_id
+    ).one()
+    assert refreshed.total_urls is None
+    assert refreshed.done_urls == 0
+    assert refreshed.status == "pending"
+
+
 def test_activate_continuous_campaign_does_not_dispatch_chord(app_client, admin_user, source, keyword, db_session):
     campaign = Campaign(
         name="C", start_date="2026-06-01", status="DRAFT", owner_id=admin_user.user_id, mode="CONTINUOUS"
