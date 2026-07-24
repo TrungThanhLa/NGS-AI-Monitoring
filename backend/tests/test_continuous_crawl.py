@@ -517,6 +517,57 @@ def test_crawl_task_swallows_discover_exception_so_chord_callback_still_fires(db
     crawl_task.run(str(source.source_id))
 
 
+def test_crawl_task_sets_crawl_started_at_during_run_and_clears_after(db_session, monkeypatch):
+    # Cột crawl_started_at phục vụ cột "Trạng thái" (Đang quét/Đã quét) trên UI Tiến độ
+    # crawl — phải có giá trị TRONG lúc discover/fetch đang chạy, và về lại NULL ngay
+    # sau khi crawl_task kết thúc (không kẹt mãi ở "Đang quét").
+    source = Source(name="X", domain=f"x-{uuid.uuid4()}.example", group_name="G", is_active=True, status="ACTIVE")
+    db_session.add(source)
+    db_session.flush()
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.SessionLocal", lambda: db_session)
+
+    captured = {}
+
+    def _fake_discover(db, src, today=None):
+        db.refresh(src)
+        captured["during"] = src.crawl_started_at
+        return 0
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.discover_source_urls", _fake_discover)
+    monkeypatch.setattr("backend.workers.continuous_crawl.fetch_pending_urls", lambda db, src: [])
+
+    source_id = source.source_id  # đọc trước khi source bị detach (crawl_task tự db.close())
+    crawl_task.run(str(source_id))
+
+    assert captured["during"] is not None
+    # crawl_task tự db.close() ở cuối — vì SessionLocal bị monkeypatch trỏ thẳng vào
+    # db_session dùng chung với test, source object gốc đã bị expunge/detach khỏi
+    # session (đọc thuộc tính của nó lúc này sẽ raise DetachedInstanceError). Dùng
+    # .get() với ID đã lưu sẵn để truy vấn mới, đọc lại giá trị thật từ DB.
+    reloaded = db_session.get(Source, source_id)
+    assert reloaded.crawl_started_at is None
+
+
+def _raise_boom(*args, **kwargs):
+    raise RuntimeError("boom")
+
+
+def test_crawl_task_clears_crawl_started_at_even_when_discover_raises(db_session, monkeypatch):
+    source = Source(name="X", domain=f"x-{uuid.uuid4()}.example", group_name="G", is_active=True, status="ACTIVE")
+    db_session.add(source)
+    db_session.flush()
+
+    monkeypatch.setattr("backend.workers.continuous_crawl.SessionLocal", lambda: db_session)
+    monkeypatch.setattr("backend.workers.continuous_crawl.discover_source_urls", _raise_boom)
+
+    source_id = source.source_id
+    crawl_task.run(str(source_id))
+
+    reloaded = db_session.get(Source, source_id)
+    assert reloaded.crawl_started_at is None
+
+
 from datetime import timedelta
 from backend.workers.continuous_crawl import _compute_required_floor
 

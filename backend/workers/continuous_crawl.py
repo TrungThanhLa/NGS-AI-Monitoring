@@ -177,14 +177,18 @@ def fetch_pending_urls(db, source: Source) -> list[Article]:
         try:
             db.commit()
         except IntegrityError:
-            # Có thể xảy ra khi 1 chu kỳ Fetch chưa xử lý hết hàng đợi trước khi
-            # crawl_frequency trôi qua lần nữa (VD nguồn có backlog lớn hơn dự kiến
-            # lúc mới bật continuous crawl) — Beat enqueue thêm crawl_task cho CÙNG
-            # source_id trong khi task cũ vẫn đang chạy, 2 tiến trình cùng fetch
-            # trùng 1 URL và cùng insert — partial unique index (source_id, url_hash)
-            # chặn đúng, nhưng phải rollback + bỏ qua thay vì để crash cả crawl_task
-            # (mất luôn tiến độ các URL còn lại trong batch). Không phải lỗi dữ liệu —
-            # bài đã được tiến trình kia lưu thành công, coi như hàng này xong việc.
+            # [SỬA 2026-07-24] check_due_sources giờ đã "claim" nguyên tử (crawl_started_at)
+            # trước khi dispatch nên Beat không còn tự chồng 2 crawl_task cho cùng source_id
+            # nữa (xem scheduler.py check_due_sources) — nhưng vẫn CẦN giữ nguyên nhánh này
+            # làm lưới an toàn cho 2 trường hợp khác: (1) gọi crawl_task trực tiếp/thủ công,
+            # không qua check_due_sources nên không đi qua bước claim; (2) race với Campaign
+            # ONE_SHOT — campaign_tasks.crawl_campaign_source_once (chord riêng, không qua
+            # check_due_sources/claim) có thể fetch trùng URL với continuous_crawl.crawl_task
+            # đang chạy song song cho cùng Source. Cả 2 trường hợp đều khiến 2 tiến trình cùng
+            # fetch trùng 1 URL và cùng insert — partial unique index (source_id, url_hash)
+            # chặn đúng, nhưng phải rollback + bỏ qua thay vì để crash cả crawl_task (mất luôn
+            # tiến độ các URL còn lại trong batch). Không phải lỗi dữ liệu — bài đã được tiến
+            # trình kia lưu thành công, coi như hàng này xong việc.
             db.rollback()
             row.status = "fetched"
             row.fetched_at = datetime.now(timezone.utc)
@@ -351,6 +355,11 @@ def crawl_task(source_id: str) -> None:
         source = db.get(Source, uuid.UUID(source_id))
         if source is None:
             return
+        # Cờ "đang quét" cho UI (Trạng thái: Đang quét/Đã quét) — ghi ngay khi bắt đầu,
+        # xóa về NULL trong finally bên dưới (cả khi thành công lẫn lỗi) để không kẹt
+        # mãi ở "Đang quét" nếu Discover/Fetch raise.
+        source.crawl_started_at = datetime.now(timezone.utc)
+        db.commit()
         try:
             discover_source_urls(db, source)
             fetched_articles = fetch_pending_urls(db, source)
@@ -366,5 +375,8 @@ def crawl_task(source_id: str) -> None:
             # crawl thành công (xem thiết kế Phase 7 "Error Handling"). Log lại để vận hành biết
             # Source nào lỗi, nhưng để task tự coi là hoàn thành từ góc nhìn Celery.
             logger.exception("crawl_task thất bại cho source_id=%s", source_id)
+        finally:
+            source.crawl_started_at = None
+            db.commit()
     finally:
         db.close()

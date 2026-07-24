@@ -7,10 +7,12 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from sqlalchemy import nullsfirst
+
 from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
-from backend.system_settings import get_bool_setting
+from backend.system_settings import get_bool_setting, get_setting
 from backend.models import (
     Article,
     Campaign,
@@ -609,6 +611,62 @@ def download_campaign_report(
     )
 
 
+_CONTINUOUS_CRAWL_TASK_NAME = "continuous_crawl.crawl_task"
+
+
+def _revoke_running_crawl_tasks_for_campaign_sources(db: Session, campaign: Campaign) -> None:
+    """Dừng NGAY task Fetch (continuous_crawl.crawl_task) đang chạy dở cho các Nguồn của
+    Campaign này — không thêm cột DB lưu celery_task_id, tra trực tiếp bằng
+    celery_app.control.inspect().active() tại thời điểm Pause. Bỏ qua Nguồn nào còn được
+    Campaign CONTINUOUS ACTIVE KHÁC theo dõi — task đó vẫn đang phục vụ campaign hợp lệ
+    khác, không có lý do gì để ngắt ngang (dữ liệu không mất nếu revoke, chỉ trễ tới chu
+    kỳ sau, nhưng an toàn hơn là chừa nguyên cho campaign kia)."""
+    own_source_ids = {
+        str(source_id)
+        for (source_id,) in db.query(CampaignSource.source_id).filter(CampaignSource.campaign_id == campaign.campaign_id).all()
+    }
+    if not own_source_ids:
+        return
+
+    still_watched_elsewhere = {
+        str(source_id)
+        for (source_id,) in db.query(CampaignSource.source_id)
+        .join(Campaign, Campaign.campaign_id == CampaignSource.campaign_id)
+        .filter(
+            CampaignSource.source_id.in_(own_source_ids),
+            Campaign.campaign_id != campaign.campaign_id,
+            Campaign.status == "ACTIVE",
+            Campaign.mode == "CONTINUOUS",
+        )
+        .all()
+    }
+    revocable_source_ids = own_source_ids - still_watched_elsewhere
+    if not revocable_source_ids:
+        return
+
+    revoked_source_ids: set[str] = set()
+    active_tasks = celery_app.control.inspect().active() or {}
+    for worker_tasks in active_tasks.values():
+        for task in worker_tasks:
+            if task.get("name") != _CONTINUOUS_CRAWL_TASK_NAME:
+                continue
+            task_args = task.get("args") or []
+            if task_args and task_args[0] in revocable_source_ids:
+                celery_app.control.revoke(task["id"], terminate=True)
+                revoked_source_ids.add(task_args[0])
+
+    if revoked_source_ids:
+        # revoke(terminate=True) gửi SIGTERM giết hẳn tiến trình con đang chạy — code
+        # Python trong finally của crawl_task (chỗ xóa crawl_started_at) KHÔNG kịp chạy
+        # vì tiến trình đã bị OS kill giữa chừng (xác nhận thật qua log celery-worker:
+        # "Terminating <task_id> (15)" xảy ra ngay giữa lúc đang Fetch, không phải lúc
+        # code tới finally). Phải tự xóa cờ ở đây, không được trông chờ task tự dọn dẹp.
+        db.query(Source).filter(Source.source_id.in_([uuid.UUID(sid) for sid in revoked_source_ids])).update(
+            {"crawl_started_at": None}, synchronize_session=False
+        )
+        db.commit()
+
+
 @router.post("/{campaign_id}/pause")
 def pause_campaign(
     campaign_id: str,
@@ -625,6 +683,8 @@ def pause_campaign(
         )
 
     campaign.status = "PAUSED"
+    if campaign.mode == "CONTINUOUS":
+        _revoke_running_crawl_tasks_for_campaign_sources(db, campaign)
 
     log_action(
         db,
@@ -648,10 +708,14 @@ def get_campaign_crawl_progress(
     current_user: User = Depends(require_permission("campaign", "view")),
 ):
     campaign = _get_campaign_or_404(db, campaign_id)
+    # Nguồn chưa từng crawl (last_crawled_at NULL) lên đầu, còn lại xếp xa->gần — trước
+    # đây không có ORDER BY, Postgres không đảm bảo thứ tự ổn định giữa các lần gọi
+    # (quan sát thật trên UI: thứ tự nguồn tự đổi chỗ dù dữ liệu không đổi).
     watched_sources = (
         db.query(Source)
         .join(CampaignSource, CampaignSource.source_id == Source.source_id)
         .filter(CampaignSource.campaign_id == campaign.campaign_id)
+        .order_by(nullsfirst(Source.last_crawled_at.asc()))
         .all()
     )
 
@@ -705,6 +769,18 @@ def get_campaign_crawl_progress(
                 "source_status": s.status,
                 "pending_count": pending_count,
                 "matched_last_24h": matched_last_24h,
+                # "SCANNING" nếu crawl_task đang chạy thật cho nguồn này (cờ ghi bởi
+                # chính crawl_task, xem continuous_crawl.py) — phục vụ cột "Trạng thái"
+                # (Đang quét/Đã quét) trên UI Tiến độ crawl.
+                "scan_status": "SCANNING" if s.crawl_started_at is not None else "IDLE",
             }
         )
-    return {"mode": "CONTINUOUS", "sources": sources}
+    # last_beat_tick_at: lần cuối Celery Beat (check_due_sources) thực sự chạy — FE dùng
+    # vẽ ring loader đếm theo nhịp Beat thật, tự phát hiện Beat "chết" nếu giá trị này
+    # không cập nhật trong thời gian dài (xem hội thoại thiết kế 2026-07-24). None nếu
+    # Beat chưa từng chạy lần nào kể từ khi deploy tính năng này.
+    return {
+        "mode": "CONTINUOUS",
+        "sources": sources,
+        "last_beat_tick_at": get_setting(db, "LAST_BEAT_TICK_AT"),
+    }

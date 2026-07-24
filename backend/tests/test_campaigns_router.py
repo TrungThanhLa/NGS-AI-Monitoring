@@ -311,6 +311,111 @@ def test_pause_campaign_succeeds_from_active(app_client, admin_user, db_session)
     assert response.json()["status"] == "PAUSED"
 
 
+def test_pause_campaign_revokes_running_crawl_task_for_its_source(app_client, admin_user, db_session, source):
+    # Bug thật phát hiện qua smoke test thủ công (2026-07-24): Pause chỉ đổi DB status,
+    # không hề tác động tới crawl_task Celery đang chạy dở cho nguồn của Campaign — task
+    # đó cứ chạy tiếp tuần tự (1.5s/URL) cho tới hết batch hiện tại dù đã Pause, khiến
+    # nút Tạm dừng không có tác dụng "phanh khẩn cấp" ngay lập tức. Sửa bằng cách tra
+    # celery_app.control.inspect().active() (không cần thêm cột DB lưu task_id) để tìm
+    # đúng task "continuous_crawl.crawl_task" đang chạy cho source_id của Campaign này,
+    # rồi revoke(terminate=True) — cùng pattern đã dùng cho Hủy báo cáo (report cancel).
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.celery_app") as mock_celery_app:
+        mock_celery_app.control.inspect.return_value.active.return_value = {
+            "worker1@host": [
+                {
+                    "id": "task-xyz",
+                    "name": "continuous_crawl.crawl_task",
+                    "args": [str(source.source_id)],
+                },
+                {
+                    "id": "task-other-source",
+                    "name": "continuous_crawl.crawl_task",
+                    "args": [str(uuid.uuid4())],
+                },
+                {
+                    "id": "task-unrelated-name",
+                    "name": "scheduler.check_due_sources",
+                    "args": [],
+                },
+            ]
+        }
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/pause")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "PAUSED"
+    mock_celery_app.control.revoke.assert_called_once_with("task-xyz", terminate=True)
+
+
+def test_pause_campaign_clears_crawl_started_at_for_revoked_source(app_client, admin_user, db_session, source):
+    # Bug thật phát hiện qua smoke test thủ công (2026-07-24, log celery-worker xác nhận):
+    # revoke(terminate=True) gửi SIGTERM giết hẳn tiến trình con — code Python trong
+    # finally của crawl_task (chỗ xóa crawl_started_at) KHÔNG kịp chạy vì tiến trình đã
+    # bị OS kill giữa chừng. Cờ "Đang quét" kẹt vĩnh viễn trên UI. Phải tự xóa cờ ngay
+    # tại nơi gọi revoke, không được trông chờ code bên trong task tự dọn dẹp.
+    from datetime import datetime, timezone
+
+    source.crawl_started_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    campaign = Campaign(
+        name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.celery_app") as mock_celery_app:
+        mock_celery_app.control.inspect.return_value.active.return_value = {
+            "worker1@host": [
+                {"id": "task-xyz", "name": "continuous_crawl.crawl_task", "args": [str(source.source_id)]},
+            ]
+        }
+        response = app_client.post(f"/api/campaigns/{campaign.campaign_id}/pause")
+
+    assert response.status_code == 200
+    db_session.refresh(source)
+    assert source.crawl_started_at is None
+
+
+def test_pause_campaign_does_not_revoke_source_still_watched_by_other_active_campaign(
+    app_client, admin_user, db_session, source
+):
+    # Nếu 1 Nguồn còn được Campaign CONTINUOUS ACTIVE KHÁC theo dõi, không được revoke —
+    # sẽ làm gián đoạn crawl hợp lệ của campaign kia (dữ liệu không mất, chỉ trễ tới chu
+    # kỳ sau, nhưng không có lý do gì để ngắt ngang task đang phục vụ campaign còn Active).
+    campaign_to_pause = Campaign(
+        name="C1", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    other_active_campaign = Campaign(
+        name="C2", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS"
+    )
+    db_session.add_all([campaign_to_pause, other_active_campaign])
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign_to_pause.campaign_id, source_id=source.source_id))
+    db_session.add(CampaignSource(campaign_id=other_active_campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    with patch("backend.routers.campaigns.celery_app") as mock_celery_app:
+        mock_celery_app.control.inspect.return_value.active.return_value = {
+            "worker1@host": [
+                {"id": "task-xyz", "name": "continuous_crawl.crawl_task", "args": [str(source.source_id)]},
+            ]
+        }
+        response = app_client.post(f"/api/campaigns/{campaign_to_pause.campaign_id}/pause")
+
+    assert response.status_code == 200
+    mock_celery_app.control.revoke.assert_not_called()
+
+
 def test_create_campaign_allows_duplicate_source_and_keyword_ids(app_client, admin_user, source, keyword):
     # Payload có ID trùng lặp (VD FE gửi nhầm 2 lần cùng 1 source_id) vẫn phải được chấp nhận —
     # trước fix, so sánh len(sources) != len(source_ids) sai vì query DB tự dedup theo PK,
@@ -830,6 +935,82 @@ def test_crawl_progress_continuous_returns_source_activity(app_client, admin_use
     assert body["mode"] == "CONTINUOUS"
     assert body["sources"][0]["pending_count"] == 1
     assert body["sources"][0]["matched_last_24h"] == 1
+
+
+def test_crawl_progress_continuous_orders_never_crawled_sources_first_then_oldest(
+    app_client, admin_user, db_session
+):
+    # UI yêu cầu (2026-07-24): Nguồn chưa từng crawl lên đầu bảng, còn lại xếp theo
+    # lần crawl gần nhất xa -> gần. Trước đây query không có ORDER BY, Postgres không
+    # đảm bảo thứ tự ổn định giữa 2 lần gọi API (đã quan sát thật trên UI).
+    from datetime import datetime, timezone
+
+    never_crawled = Source(name="Never", domain=f"never-{uuid.uuid4()}.example", group_name="G", is_active=True)
+    crawled_recent = Source(
+        name="Recent",
+        domain=f"recent-{uuid.uuid4()}.example",
+        group_name="G",
+        is_active=True,
+        last_crawled_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+    )
+    crawled_old = Source(
+        name="Old",
+        domain=f"old-{uuid.uuid4()}.example",
+        group_name="G",
+        is_active=True,
+        last_crawled_at=datetime(2026, 7, 1, tzinfo=timezone.utc),
+    )
+    db_session.add_all([never_crawled, crawled_recent, crawled_old])
+    db_session.flush()
+
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.flush()
+    for s in (crawled_recent, never_crawled, crawled_old):  # cố ý thêm không theo thứ tự mong đợi
+        db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=s.source_id))
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+
+    assert response.status_code == 200
+    names = [s["source_name"] for s in response.json()["sources"]]
+    assert names == ["Never", "Old", "Recent"]
+
+
+def test_crawl_progress_continuous_includes_scan_status_per_source(app_client, admin_user, source, db_session):
+    from datetime import datetime, timezone
+
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+    assert response.json()["sources"][0]["scan_status"] == "IDLE"
+
+    source.crawl_started_at = datetime.now(timezone.utc)
+    db_session.commit()
+
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+    assert response.json()["sources"][0]["scan_status"] == "SCANNING"
+
+
+def test_crawl_progress_continuous_includes_last_beat_tick_at(app_client, admin_user, source, db_session):
+    from backend.system_settings import set_setting
+
+    campaign = Campaign(name="C", start_date="2026-06-01", status="ACTIVE", owner_id=admin_user.user_id, mode="CONTINUOUS")
+    db_session.add(campaign)
+    db_session.flush()
+    db_session.add(CampaignSource(campaign_id=campaign.campaign_id, source_id=source.source_id))
+    db_session.commit()
+
+    # Không assert giá trị ban đầu là None — DB dev thật có thể đã có Celery Beat chạy
+    # thật từ trước, ghi sẵn LAST_BEAT_TICK_AT (ambient state, không liên quan tới test
+    # này). Chỉ cần xác nhận field tồn tại và phản ánh đúng giá trị vừa ghi.
+    set_setting(db_session, "LAST_BEAT_TICK_AT", "2026-07-24T01:47:00+00:00")
+    response = app_client.get(f"/api/campaigns/{campaign.campaign_id}/crawl-progress")
+    assert response.json()["last_beat_tick_at"] == "2026-07-24T01:47:00+00:00"
 
 
 def test_create_continuous_campaign_rejects_start_date_older_than_180_days(app_client, admin_user):

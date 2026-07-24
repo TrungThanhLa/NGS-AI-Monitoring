@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { App, Button, Card, Col, DatePicker, Descriptions, Progress, Row, Select, Space, Table, Tag, Tooltip } from 'antd'
-import { EditOutlined, ArrowLeftOutlined, PlusOutlined } from '@ant-design/icons'
+import { EditOutlined, ArrowLeftOutlined, PlusOutlined, SyncOutlined, WarningOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import StatusTag from '@/components/common/StatusTag'
 import PageHeader from '@/components/common/PageHeader'
@@ -45,10 +45,57 @@ type CrawlProgressSourceContinuous = {
   source_status: string
   pending_count: number
   matched_last_24h: number
+  scan_status: 'SCANNING' | 'IDLE'
 }
 type CrawlProgress =
   | { mode: 'ONE_SHOT'; sources: CrawlProgressSourceOneShot[]; overall_percent: number }
-  | { mode: 'CONTINUOUS'; sources: CrawlProgressSourceContinuous[] }
+  | { mode: 'CONTINUOUS'; sources: CrawlProgressSourceContinuous[]; last_beat_tick_at: string | null }
+
+const BEAT_INTERVAL_SECONDS = 60
+// 60s chu kỳ chuẩn + 30s dư an toàn (jitter mạng/tải) trước khi coi là Beat có thể đã
+// chết hẳn — không báo động ngay ở giây 61 vì 1 chu kỳ trễ nhẹ là bình thường.
+const BEAT_STALE_THRESHOLD_SECONDS = 90
+
+// Ring loader đếm theo nhịp Celery Beat thật (không phải hiệu ứng ước lượng) — dựa trên
+// last_beat_tick_at do chính check_due_sources ghi mỗi lần THẬT SỰ chạy (kể cả khi
+// SCHEDULER_ENABLED=false). Nếu quá lâu không thấy giá trị mới, tự chuyển sang cảnh báo
+// thay vì tiếp tục lặp vòng đếm giả vờ khỏe mạnh (xem hội thoại thiết kế 2026-07-24).
+function BeatRingLoader({ lastBeatTickAt }: { lastBeatTickAt: string | null }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  if (!lastBeatTickAt) {
+    return (
+      <Tooltip title="Chưa ghi nhận lần Celery Beat nào chạy kể từ khi tính năng này được triển khai">
+        <Progress type="circle" percent={0} size={44} format={() => '—'} strokeColor="#d9d9d9" />
+      </Tooltip>
+    )
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((now - new Date(lastBeatTickAt).getTime()) / 1000))
+
+  if (elapsedSeconds > BEAT_STALE_THRESHOLD_SECONDS) {
+    return (
+      <Tooltip
+        title={`Beat có thể đang gặp sự cố — đã ${elapsedSeconds}s không ghi nhận nhịp mới (bình thường mỗi ${BEAT_INTERVAL_SECONDS}s)`}
+      >
+        <Progress type="circle" percent={100} size={44} status="exception" format={() => <WarningOutlined />} />
+      </Tooltip>
+    )
+  }
+
+  const percent = Math.min(100, Math.round((elapsedSeconds / BEAT_INTERVAL_SECONDS) * 100))
+  return (
+    <Tooltip
+      title={`Lần Beat gần nhất: ${new Date(lastBeatTickAt).toLocaleTimeString('vi-VN')} — hệ thống kiểm tra lại nguồn cần crawl mỗi ${BEAT_INTERVAL_SECONDS}s`}
+    >
+      <Progress type="circle" percent={percent} size={44} format={() => `${Math.min(elapsedSeconds, BEAT_INTERVAL_SECONDS)}s`} />
+    </Tooltip>
+  )
+}
 
 const FORMAT_OPTIONS = [
   { value: 'docx', label: 'Word (.docx)' },
@@ -69,6 +116,8 @@ export default function CampaignDetail() {
   const [reportFormat, setReportFormat] = useState('docx')
   const [creatingReport, setCreatingReport] = useState(false)
   const [crawlProgress, setCrawlProgress] = useState<CrawlProgress | null>(null)
+  const [activating, setActivating] = useState(false)
+  const [pausing, setPausing] = useState(false)
   const hasPrefilledRange = useRef(false)
 
   function loadCampaign() {
@@ -107,17 +156,24 @@ export default function CampaignDetail() {
     return () => clearInterval(interval)
   }, [reports])
 
-  // Poll tiến độ crawl VÀ trạng thái Campaign mỗi 3s khi đang ACTIVE — dừng khi
-  // COMPLETED/PAUSED/ARCHIVED. Phải poll cả loadCampaign() ở đây (không chỉ
-  // loadCrawlProgress()) — nếu không, sau khi crawl xong (chord callback chuyển
-  // campaign.status=COMPLETED phía backend), UI vẫn đứng yên với nút "Tạm dừng" hiển
-  // thị sai trên 1 Campaign thực ra đã COMPLETED, cho tới khi người dùng tự F5.
+  // Poll tiến độ crawl mỗi 3s LUÔN LUÔN, không phụ thuộc campaign.status — bug thật phát
+  // hiện 2026-07-24: last_beat_tick_at (ring loader) là nhịp tim Beat TOÀN HỆ THỐNG,
+  // không phải trạng thái riêng của Campaign này. Trước đây gộp chung điều kiện
+  // "chỉ poll khi ACTIVE" khiến sau khi Pause, giá trị last_beat_tick_at bị đóng băng ở
+  // FE trong khi Beat thật vẫn chạy đều mỗi 60s — ring loader hiểu nhầm "Beat chết", báo
+  // cảnh báo oan. API này rẻ (chỉ đọc DB), poll liên tục không đáng ngại.
+  useEffect(() => {
+    const interval = setInterval(loadCrawlProgress, 3000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // Poll riêng trạng thái Campaign mỗi 3s khi đang ACTIVE — dừng khi COMPLETED/PAUSED/
+  // ARCHIVED. Cần tách riêng khỏi effect trên: sau khi crawl xong (chord callback chuyển
+  // campaign.status=COMPLETED phía backend), UI vẫn đứng yên với nút "Tạm dừng" hiển thị
+  // sai trên 1 Campaign thực ra đã COMPLETED, cho tới khi người dùng tự F5.
   useEffect(() => {
     if (campaign?.status !== 'ACTIVE') return
-    const interval = setInterval(() => {
-      loadCrawlProgress()
-      loadCampaign()
-    }, 3000)
+    const interval = setInterval(loadCampaign, 3000)
     return () => clearInterval(interval)
   }, [campaign?.status])
 
@@ -131,29 +187,39 @@ export default function CampaignDetail() {
   const hasActiveReport = reports.some((r) => r.status === 'pending' || r.status === 'running')
 
   async function handleActivate() {
-    const res = await authFetch(`/api/campaigns/${id}/activate`, { method: 'POST' })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      const detail: string = body.detail || 'Kích hoạt thất bại'
-      // SCHEDULER_ENABLED tắt là lỗi nghiêm trọng dễ bị bỏ qua nếu chỉ hiện toast thoáng
-      // qua (Campaign vẫn tưởng kích hoạt được nếu người dùng không đọc kỹ) — dùng dialog
-      // chặn (Modal) thay vì message để chắc chắn người dùng phải xác nhận đã đọc
-      if (detail.includes('SCHEDULER_ENABLED')) {
-        modal.error({ title: 'Không thể kích hoạt', content: detail })
+    setActivating(true)
+    try {
+      const res = await authFetch(`/api/campaigns/${id}/activate`, { method: 'POST' })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const detail: string = body.detail || 'Kích hoạt thất bại'
+        // SCHEDULER_ENABLED tắt là lỗi nghiêm trọng dễ bị bỏ qua nếu chỉ hiện toast thoáng
+        // qua (Campaign vẫn tưởng kích hoạt được nếu người dùng không đọc kỹ) — dùng dialog
+        // chặn (Modal) thay vì message để chắc chắn người dùng phải xác nhận đã đọc
+        if (detail.includes('SCHEDULER_ENABLED')) {
+          modal.error({ title: 'Không thể kích hoạt', content: detail })
+          return
+        }
+        message.error(detail)
         return
       }
-      message.error(detail)
-      return
+      message.success('Đã kích hoạt chiến dịch')
+      loadCampaign()
+    } finally {
+      setActivating(false)
     }
-    message.success('Đã kích hoạt chiến dịch')
-    loadCampaign()
   }
 
   async function handlePause() {
-    const res = await authFetch(`/api/campaigns/${id}/pause`, { method: 'POST' })
-    if (res.ok) {
-      message.success('Đã tạm dừng chiến dịch')
-      loadCampaign()
+    setPausing(true)
+    try {
+      const res = await authFetch(`/api/campaigns/${id}/pause`, { method: 'POST' })
+      if (res.ok) {
+        message.success('Đã tạm dừng chiến dịch')
+        loadCampaign()
+      }
+    } finally {
+      setPausing(false)
     }
   }
 
@@ -224,14 +290,16 @@ export default function CampaignDetail() {
             </Button>
             {(campaign.status === 'DRAFT' || campaign.status === 'PAUSED') && (
               <PermissionGuard permission="campaign.update">
-                <Button type="primary" onClick={handleActivate}>
-                  Kích hoạt
+                <Button type="primary" loading={activating} disabled={activating} onClick={handleActivate}>
+                  {activating ? 'Đang kích hoạt...' : 'Kích hoạt'}
                 </Button>
               </PermissionGuard>
             )}
             {campaign.status === 'ACTIVE' && (
               <PermissionGuard permission="campaign.update">
-                <Button onClick={handlePause}>Tạm dừng</Button>
+                <Button loading={pausing} disabled={pausing} onClick={handlePause}>
+                  {pausing ? 'Đang tạm dừng...' : 'Tạm dừng'}
+                </Button>
               </PermissionGuard>
             )}
           </Space>
@@ -347,7 +415,11 @@ export default function CampaignDetail() {
       </Card>
 
       {crawlProgress && (
-        <Card title="Tiến độ crawl" style={{ borderRadius: 12, marginTop: 16 }}>
+        <Card
+          title="Tiến độ crawl"
+          extra={crawlProgress.mode === 'CONTINUOUS' ? <BeatRingLoader lastBeatTickAt={crawlProgress.last_beat_tick_at} /> : undefined}
+          style={{ borderRadius: 12, marginTop: 16 }}
+        >
           {crawlProgress.mode === 'ONE_SHOT' ? (
             <Space direction="vertical" style={{ width: '100%' }}>
               <Progress percent={crawlProgress.overall_percent} />
@@ -371,6 +443,17 @@ export default function CampaignDetail() {
                   title: 'Lần crawl gần nhất',
                   dataIndex: 'last_crawled_at',
                   render: (v: string | null) => (v ? new Date(v).toLocaleString('vi-VN') : 'Chưa crawl'),
+                },
+                {
+                  title: 'Trạng thái',
+                  dataIndex: 'scan_status',
+                  width: 130, // cố định — tránh giật layout khi Tag đổi độ rộng lúc chuyển Đã quét <-> Đang quét
+                  render: (v: 'SCANNING' | 'IDLE') =>
+                    v === 'SCANNING' ? (
+                      <Tag icon={<SyncOutlined spin />} color="processing">Đang quét</Tag>
+                    ) : (
+                      <Tag>Đã quét</Tag>
+                    ),
                 },
                 { title: 'Bài mới khớp (24h)', dataIndex: 'matched_last_24h' },
                 { title: 'Hàng đợi còn lại', dataIndex: 'pending_count' },

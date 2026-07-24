@@ -90,7 +90,13 @@ def test_disabling_scheduler_pauses_active_continuous_campaigns(app_client, db_s
     response = app_client.put("/api/system-settings/SCHEDULER_ENABLED", json={"setting_value": "false"})
 
     assert response.status_code == 200
-    assert response.json()["paused_campaign_ids"] == [str(continuous_active.campaign_id)]
+    # Dùng "có chứa" thay vì so khớp tuyệt đối cả danh sách — DB dev thật có thể đã có
+    # sẵn Campaign CONTINUOUS ACTIVE khác từ trước (VD do test thủ công qua UI), không
+    # liên quan tới 2 campaign test này tạo riêng.
+    paused_ids = response.json()["paused_campaign_ids"]
+    assert str(continuous_active.campaign_id) in paused_ids
+    assert str(continuous_paused.campaign_id) not in paused_ids
+    assert str(one_shot_active.campaign_id) not in paused_ids
 
     db_session.refresh(continuous_active)
     db_session.refresh(continuous_paused)

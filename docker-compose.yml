@@ -64,7 +64,12 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    command: celery -A backend.workers.celery_app worker --loglevel=info
+    # --concurrency=8: cố định thay vì để mặc định ăn theo số CPU core máy host (đã xác
+    # nhận qua `celery inspect stats` trước đây trùng nproc, không phải giá trị chủ đích)
+    # — chừa CPU cho Postgres/backend API/Celery Beat/underthesea dù đã có VGA riêng cho
+    # AI (Ollama). Có thể tinh chỉnh lại sau khi theo dõi `docker stats` thật lúc vận
+    # hành nhiều Campaign đồng thời (2026-07-24).
+    command: celery -A backend.workers.celery_app worker --loglevel=info --concurrency=8
     env_file: .env
     volumes:
       - ./backend:/app/backend

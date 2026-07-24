@@ -29,3 +29,8 @@ class Source(Base):
     # mốc này hay không (xem continuous_crawl.py discover_source_urls). Không bao giờ
     # co lại/nới gần hơn hiện tại — chỉ tiến xa hơn về quá khứ.
     discover_backfilled_from = Column(TIMESTAMP)
+    # Ghi lúc crawl_task bắt đầu chạy thật cho Nguồn này, xóa về NULL lúc kết thúc (dù
+    # thành công/lỗi) — cột "Trạng thái" (Đang quét/Đã quét) trên UI Tiến độ crawl đọc
+    # thẳng cột này, không hỏi Celery inspect().active() mỗi lần gọi API (chậm hơn, tốn
+    # RPC nếu FE poll dày — xem continuous_crawl.py crawl_task).
+    crawl_started_at = Column(TIMESTAMP)
