@@ -18,7 +18,6 @@ import CaseDetail from "@/pages/Cases/CaseDetail";
 import ProfilePage from "@/pages/Profile";
 import ReportsPage from "@/pages/Reports";
 import ReportCreate from "@/pages/Reports/ReportCreate";
-import JobsPage from "@/pages/Jobs";
 import UsersPage from "@/pages/System/Users";
 import RolesPage from "@/pages/System/Roles";
 import MasterDataPage from "@/pages/System/MasterData";
@@ -58,8 +57,6 @@ export default function App() {
 
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/create" element={<ReportCreate />} />
-
-          <Route path="/jobs" element={<JobsPage />} />
         </Route>
       </Route>
 

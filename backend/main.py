@@ -14,8 +14,10 @@ from backend.routers import (
     keywords,
     report_history,
     roles,
+    source_groups,
     sources,
     system_settings,
+    topic_groups,
     users,
 )
 from backend.routers.auth import limiter
@@ -34,7 +36,9 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(sources.router)
+app.include_router(source_groups.router)
 app.include_router(keywords.router)
+app.include_router(topic_groups.router)
 app.include_router(campaigns.router)
 app.include_router(contents.router)
 app.include_router(report_history.router)

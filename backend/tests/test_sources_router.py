@@ -78,6 +78,35 @@ def test_list_sources_returns_expected_fields(app_client, db_session):
         db_session.commit()
 
 
+def test_list_sources_includes_readonly_crawl_config_fields(app_client, db_session):
+    # sitemap_url/parsing_rules/last_crawled_at/discover_backfilled_from chỉ Admin cấu hình
+    # qua DB (xem CLAUDE.md nguyên tắc 7) — FE cần hiển thị readonly để biết Nguồn đang
+    # crawl thế nào, không phải để sửa qua API này
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    source = Source(
+        name="Detailed", domain=f"detailed-{uuid.uuid4()}.example", group_name="G1", is_active=True,
+        sitemap_url="https://example.com/sitemap.xml",
+        parsing_rules={"title": ".title", "engine": "crawl4ai"},
+        last_crawled_at=now,
+        discover_backfilled_from=now,
+    )
+    db_session.add(source)
+    db_session.commit()
+
+    try:
+        response = app_client.get("/api/sources")
+        body = next(s for s in response.json()["sources"] if s["name"] == "Detailed")
+        assert body["sitemap_url"] == "https://example.com/sitemap.xml"
+        assert body["parsing_rules"] == {"title": ".title", "engine": "crawl4ai"}
+        assert body["last_crawled_at"] is not None
+        assert body["discover_backfilled_from"] is not None
+    finally:
+        db_session.delete(source)
+        db_session.commit()
+
+
 def test_list_sources_includes_scheduler_fields(app_client, db_session):
     source = Source(
         name="Scheduled", domain=f"sched-{uuid.uuid4()}.example", group_name="G1",

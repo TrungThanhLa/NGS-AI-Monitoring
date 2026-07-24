@@ -34,6 +34,15 @@ a:hover {
   color: #0B1F3A;
 }
 
+/* Ngôn ngữ thiết kế popup chung toàn hệ thống — height tối đa theo màn hình (không bao
+   giờ dài hơn viewport), phần header/footer luôn cố định, chỉ nội dung body scroll bên
+   trong khi content dài hơn — áp dụng cho MỌI Modal của antd, không cần sửa từng file */
+.ant-modal-body {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

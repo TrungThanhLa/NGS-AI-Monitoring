@@ -1,6 +1,6 @@
 # Roadmap: sửa & hoàn thiện NGS Monitor theo đúng nghiệp vụ Continuous Monitoring
 
-> **Trạng thái (2026-07-16): thiết kế đã CHỐT hoàn toàn, CHƯA CODE.** Promote từ `docs/project_business/07_ROADMAP_TO_NEW_BUSINESS_FLOW.md` sau khi toàn bộ `docs/project_business/06_OPEN_DECISIONS.md` đã được xác nhận — không còn quyết định nghiệp vụ nào chặn việc bắt đầu Phase 1. Đặc tả chi tiết đầy đủ (business rules, schema, API, screens) đã chuyển thành rule chính thức trong `.claude/rules/` — [01 · Project Overview](../.claude/rules/01-project-overview.md) (tầm nhìn), rule 03/04/05/06/07/08/09 (schema/flow/API/crawler/AI/report/UI, mỗi phần đánh dấu `[ĐÃ CODE]`/`[CHƯA CODE]`), và [15](../.claude/rules/15-auth-rbac.md)–[18](../.claude/rules/18-alert-case-management.md) (business rules riêng từng domain mới). File này chỉ còn vai trò **lộ trình theo Phase** (thứ tự Thêm/Sửa/Xóa + rủi ro), không lặp lại chi tiết thiết kế. Lịch sử quá trình ra quyết định đầy đủ (lý do từng lựa chọn) vẫn giữ ở `docs/project_business/06_OPEN_DECISIONS.md` để tham khảo.
+> **Trạng thái (cập nhật 2026-07-24): Phase 0–4 và Phase 7 đã CODE xong trên `main`, sẵn sàng bắt đầu Phase 5 (Alert Engine).** Ghi nhận ban đầu 2026-07-16 khi mới chốt thiết kế (chưa code) đã lỗi thời — xem CLAUDE.md mục "Trạng thái dự án & Quyết định quan trọng" để biết trạng thái mới nhất theo thời gian thực, file này chỉ giữ vai trò lộ trình theo Phase (thứ tự Thêm/Sửa/Xóa + rủi ro), không phải nguồn trạng thái authoritative. Đặc tả chi tiết đầy đủ (business rules, schema, API, screens) đã chuyển thành rule chính thức trong `.claude/rules/` — [01 · Project Overview](../.claude/rules/01-project-overview.md) (tầm nhìn), rule 03/04/05/06/07/08/09 (schema/flow/API/crawler/AI/report/UI, mỗi phần đánh dấu `[ĐÃ CODE]`/`[CHƯA CODE]`), và [15](../.claude/rules/15-auth-rbac.md)–[18](../.claude/rules/18-alert-case-management.md) (business rules riêng từng domain mới). Lịch sử quá trình ra quyết định đầy đủ (lý do từng lựa chọn) vẫn giữ ở `docs/project_business/06_OPEN_DECISIONS.md` để tham khảo.
 >
 > **Đây không phải roadmap cho "giai đoạn phát triển tiếp theo" tách biệt** — đây là lộ trình **sửa/bổ sung code on-demand hiện có** (lịch sử triển khai ở [ROADMAP_MVP.md](ROADMAP_MVP.md)) cho khớp với nghiệp vụ giám sát liên tục đã chốt là nghiệp vụ đúng duy nhất (xem [01 · Project Overview](../.claude/rules/01-project-overview.md)).
 >
@@ -13,13 +13,13 @@
 | Phase | Tên | Vì sao đứng ở vị trí này |
 |---|---|---|
 | 0 | Chốt phạm vi & viết rule mới | ✅ Hoàn thành — rule [01](../.claude/rules/01-project-overview.md), 03–09, [15](../.claude/rules/15-auth-rbac.md)–[18](../.claude/rules/18-alert-case-management.md) đã cập nhật/tạo, `CLAUDE.md` đã cập nhật (2026-07-16) |
-| 1 | Auth & RBAC | Mọi phase sau đều phụ thuộc (Campaign có `owner_id`, Case có `assigned_to`, Alert có `acknowledged_by`...) |
-| 2 | Data model — Campaign & Master Data | Nền tảng cho Scheduler, Alert, Case; đổi từ "Job đơn lẻ" sang "Campaign sống" |
-| 3 | Scheduler & Continuous Crawl | Phụ thuộc Campaign (chỉ Campaign ACTIVE mới được crawl định kỳ) |
-| 4 | Content Repository & Review Workflow | Cần nội dung có trạng thái đánh giá nghiệp vụ trước khi Alert/Case có thể gắn vào |
-| 5 | Alert Engine | Cần Content + AI đã chạy ổn định trước khi tính ngưỡng cảnh báo. **Không chặn Phase 7** |
+| 1 | Auth & RBAC | ✅ Hoàn thành — mọi phase sau đều phụ thuộc (Campaign có `owner_id`, Case có `assigned_to`, Alert có `acknowledged_by`...) |
+| 2 | Data model — Campaign & Master Data | ✅ Hoàn thành — nền tảng cho Scheduler, Alert, Case; đổi từ "Job đơn lẻ" sang "Campaign sống" |
+| 3 | Scheduler & Continuous Crawl | ✅ Hoàn thành — phụ thuộc Campaign (chỉ Campaign ACTIVE mới được crawl định kỳ) |
+| 4 | Content Repository & Review Workflow | ✅ Hoàn thành — cần nội dung có trạng thái đánh giá nghiệp vụ trước khi Alert/Case có thể gắn vào |
+| 5 | Alert Engine | **Đang chờ bắt đầu** — cần Content + AI đã chạy ổn định trước khi tính ngưỡng cảnh báo. **Không chặn Phase 7** |
 | 6 | Case Management | Cần Alert tồn tại trước (Case thường sinh từ Alert). **Không chặn Phase 7** |
-| 7 | Report mở rộng | Không phụ thuộc Alert/Case — có thể làm ngay sau Phase 2–3 |
+| 7 | Report mở rộng | ✅ Hoàn thành — không phụ thuộc Alert/Case, đã làm ngay sau Phase 2–3 |
 | 8 | Monitoring Feed (UI real-time) | Cần toàn bộ pipeline Phase 3–5 chạy ổn định mới có gì để hiển thị real-time |
 | 9 | Audit Log & System Settings | Có thể làm song song từ Phase 1, đặt cuối vì không chặn nghiệp vụ chính |
 | 10 | Custom Role Management | Đề xuất 2026-07-17 — hoãn tới sau Phase 7 (Report), cần xử lý rủi ro thiết kế trước khi code (xem mục riêng cuối file) |
@@ -34,7 +34,7 @@
 
 ---
 
-## Phase 1 — Auth & RBAC (nền tảng bắt buộc)
+## Phase 1 — Auth & RBAC (nền tảng bắt buộc) ✅ Hoàn thành
 
 **Vì sao đầu tiên:** dự án hiện tại **chưa có Auth ở bất kỳ đâu**. Mọi entity mới ở phase sau (`campaigns.owner_id`, `cases.assigned_to`, `alerts.acknowledged_by`) đều cần `users` tồn tại trước.
 
@@ -57,7 +57,7 @@
 
 ---
 
-## Phase 2 — Data model: Campaign & Master Data
+## Phase 2 — Data model: Campaign & Master Data ✅ Hoàn thành
 
 **Vì sao sau Auth:** `campaigns.owner_id` cần FK tới `users`.
 
@@ -81,7 +81,7 @@
 
 ---
 
-## Phase 3 — Scheduler & Continuous Crawl
+## Phase 3 — Scheduler & Continuous Crawl ✅ Hoàn thành
 
 **Vì sao sau Campaign:** chỉ Campaign `ACTIVE` mới được lên lịch crawl tự động.
 
@@ -106,7 +106,7 @@
 
 ---
 
-## Phase 4 — Content Repository & Review Workflow
+## Phase 4 — Content Repository & Review Workflow ✅ Hoàn thành
 
 **Vì sao ở đây:** Alert (Phase 5) cần gắn vào Content đã có trạng thái đánh giá rõ ràng; hiện tại `articles` chỉ có trạng thái kỹ thuật.
 
@@ -164,7 +164,7 @@
 
 ---
 
-## Phase 7 — Report mở rộng (có thể làm ngay sau Phase 2–3, không cần đợi Phase 5/6)
+## Phase 7 — Report mở rộng ✅ Hoàn thành (đã làm ngay sau Phase 2–3, không đợi Phase 5/6)
 
 **Thêm:**
 - `report_history.campaign_id` thay `job_id` — bắt buộc (bảng `jobs` đã xóa từ Phase 2).

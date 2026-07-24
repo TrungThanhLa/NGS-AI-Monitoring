@@ -1,58 +1,46 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import {
-  App, Table, Tag, Button, Space, Input, Select, Tooltip,
-  Typography, Modal, Form, InputNumber,
-  ColorPicker,
+  App, Table, Tag, Button, Input, Select, Tooltip,
+  Typography, Modal, Form,
 } from 'antd'
 import {
-  PlusOutlined, SearchOutlined, EditOutlined,
-  DownloadOutlined, UploadOutlined, ReloadOutlined,
-  TagsOutlined, TeamOutlined, GlobalOutlined, KeyOutlined,
-  BarChartOutlined, FileTextOutlined, FolderOutlined,
-  BellOutlined, BookOutlined,
+  PlusOutlined, SearchOutlined, EditOutlined, ReloadOutlined,
+  TeamOutlined, KeyOutlined, TagsOutlined,
 } from '@ant-design/icons'
-import dayjs from 'dayjs'
-import { platforms as mockPlatforms, sourceCategories as mockSourceCategories } from '@/data/mockData'
 import EmptyState from '@/components/common/EmptyState'
+import { authFetch } from '@/lib/api'
+import PermissionGuard from '@/components/common/PermissionGuard'
 
 const { Title, Text } = Typography
-const UPDATED_AT = '16/06/2026 10:15'
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-// Chỉ 2 tab có data mẫu thật trong mockData.ts (platforms/sourceCategories) — 7 tab
-// còn lại (topic/keyword/attention_level/content_status/case_status/alert_type/
-// report_template) không có data mẫu tương ứng, để mảng rỗng + EmptyState (Task 12).
-const INIT: Record<string, any[]> = {
-  topic: [],
-  source_group: mockSourceCategories.map((c, i) => ({
-    id: c.id, code: c.code, name: c.name, desc: '', order: i + 1, status: 'ACTIVE', updated_at: UPDATED_AT,
-  })),
-  platform: mockPlatforms.map((p, i) => ({
-    id: p.id, code: p.code, name: p.name, desc: '', order: i + 1, status: 'ACTIVE', updated_at: UPDATED_AT,
-  })),
-  keyword: [],
-  attention_level: [],
-  content_status: [],
-  case_status: [],
-  alert_type: [],
-  report_template: [],
+type ApiKeyword = { keyword_id: string; keyword: string; topic_group: string | null; is_active: boolean }
+type ApiSourceGroup = { group_id: string; name: string; is_active: boolean }
+
+// Đọc từ GET /api/topic-groups (backend/routers/topic_groups.py) — trả nguyên
+// TOPIC_GROUPS trong backend/ai/prompts/v1.py, tránh hardcode trùng lặp ở FE lệch khỏi
+// prompt AI đang chạy thật. Chỉ đọc — không có UI tạo/sửa/xóa (xem quyết định không xây
+// CRUD cho nhóm chủ đề: rủi ro drift với prompt AI + prompt injection nếu cho nhập free
+// text feed thẳng vào AI)
+function useTopicGroups() {
+  const [topicGroups, setTopicGroups] = useState<string[]>([])
+  useEffect(() => {
+    authFetch('/api/topic-groups')
+      .then(res => (res.ok ? res.json() : { topic_groups: [] }))
+      .then(d => setTopicGroups(d.topic_groups ?? []))
+      .catch(() => setTopicGroups([]))
+  }, [])
+  return topicGroups
 }
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
+// Chỉ còn 3 tab — 6 tab khác (platform/attention_level/content_status/case_status/
+// alert_type/report_template) đã gỡ vì không khớp bảng DB thật nào (status Alert/Case là
+// enum cứng trong code theo rule 18).
 const NAV_ITEMS = [
-  { key: 'topic',           icon: <TagsOutlined />,       label: 'Chủ đề',                codeLabel: 'Mã chủ đề',   nameLabel: 'Tên chủ đề' },
-  { key: 'source_group',    icon: <TeamOutlined />,        label: 'Nhóm nguồn',            codeLabel: 'Mã nhóm',     nameLabel: 'Tên nhóm nguồn' },
-  { key: 'platform',        icon: <GlobalOutlined />,      label: 'Nền tảng',              codeLabel: 'Mã nền tảng', nameLabel: 'Tên nền tảng' },
-  { key: 'keyword',         icon: <KeyOutlined />,         label: 'Từ khóa',               codeLabel: 'Mã từ khóa',  nameLabel: 'Từ khóa' },
-  { key: 'attention_level', icon: <BarChartOutlined />,    label: 'Mức độ quan tâm',       codeLabel: 'Mã',          nameLabel: 'Tên mức độ' },
-  { key: 'content_status',  icon: <FileTextOutlined />,    label: 'Trạng thái nội dung',   codeLabel: 'Mã',          nameLabel: 'Tên trạng thái' },
-  { key: 'case_status',     icon: <FolderOutlined />,      label: 'Trạng thái vụ việc',    codeLabel: 'Mã',          nameLabel: 'Tên trạng thái' },
-  { key: 'alert_type',      icon: <BellOutlined />,        label: 'Loại cảnh báo',         codeLabel: 'Mã',          nameLabel: 'Tên loại cảnh báo' },
-  { key: 'report_template', icon: <BookOutlined />,        label: 'Mẫu báo cáo',           codeLabel: 'Mã mẫu',      nameLabel: 'Tên mẫu báo cáo' },
+  { key: 'source_group', icon: <TeamOutlined />, label: 'Nhóm nguồn' },
+  { key: 'topic_group', icon: <TagsOutlined />, label: 'Nhóm chủ đề' },
+  { key: 'keyword', icon: <KeyOutlined />, label: 'Từ khóa' },
 ]
-
-const HAS_COLOR = ['attention_level', 'content_status', 'case_status']
-const HAS_SCORE = ['attention_level']
 
 // ─── Status tag ───────────────────────────────────────────────────────────────
 function StatusTag({ value }: { value: string }) {
@@ -61,66 +49,36 @@ function StatusTag({ value }: { value: string }) {
     : <Tag color="default" style={{ borderRadius: 4 }}>Ngừng sử dụng</Tag>
 }
 
-// ─── Row form modal ───────────────────────────────────────────────────────────
-function RowModal({
-  open, section, initial, onOk, onCancel,
-}: { open: boolean; section: typeof NAV_ITEMS[0]; initial: any | null; onOk: (v: any) => void; onCancel: () => void }) {
+// ─── Nhóm nguồn — nối API thật (GET/POST/PUT /api/source-groups) ──────────────
+function SourceGroupModal({
+  open, initial, onOk, onCancel,
+}: { open: boolean; initial: ApiSourceGroup | null; onOk: (v: { name: string; is_active: boolean }) => void; onCancel: () => void }) {
   const [form] = Form.useForm()
-  const hasColor = HAS_COLOR.includes(section.key)
-  const hasScore = HAS_SCORE.includes(section.key)
 
   const handleOk = () => {
-    form.validateFields().then(v => {
-      const color = hasColor && v.color
-        ? (typeof v.color === 'string' ? v.color : v.color.toHexString())
-        : undefined
-      onOk({ ...v, color })
-    })
+    form.validateFields().then(v => onOk(v))
   }
 
   const initVals = initial
-    ? { ...initial }
-    : { status: 'ACTIVE', order: 1 }
+    ? { name: initial.name, is_active: initial.is_active }
+    : { is_active: true }
 
   return (
     <Modal
-      title={initial ? `Sửa — ${section.label}` : `Thêm mới — ${section.label}`}
+      title={initial ? 'Sửa nhóm nguồn' : 'Thêm nhóm nguồn'}
       open={open} onOk={handleOk} onCancel={onCancel}
-      okText="Lưu" cancelText="Huỷ" width={560}
+      okText="Lưu" cancelText="Huỷ" width={480}
       afterOpenChange={o => { if (o) form.setFieldsValue(initVals) }}
       destroyOnClose
     >
       <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-        <Form.Item name="code" label={section.codeLabel} rules={[{ required: true }]}>
-          <Input placeholder="VD: TOPIC_01" style={{ textTransform: 'uppercase' }} />
+        <Form.Item name="name" label="Tên nhóm nguồn" rules={[{ required: true, message: 'Tên nhóm nguồn không được để trống' }]}>
+          <Input placeholder="VD: Chính phủ, Bộ ngành, Báo chí..." />
         </Form.Item>
-        <Form.Item name="name" label={section.nameLabel} rules={[{ required: true }]}>
-          <Input />
-        </Form.Item>
-        <Form.Item name="desc" label="Mô tả">
-          <Input.TextArea rows={3} />
-        </Form.Item>
-        {hasScore && (
-          <Form.Item label="Khoảng điểm">
-            <Space.Compact>
-              <Form.Item name="min_score" noStyle><InputNumber placeholder="Từ" min={0} max={100} /></Form.Item>
-              <Input style={{ width: 36, textAlign: 'center', pointerEvents: 'none', background: '#fafafa' }} placeholder="–" disabled />
-              <Form.Item name="max_score" noStyle><InputNumber placeholder="Đến" min={0} max={100} /></Form.Item>
-            </Space.Compact>
-          </Form.Item>
-        )}
-        {hasColor && (
-          <Form.Item name="color" label="Màu sắc">
-            <ColorPicker showText format="hex" />
-          </Form.Item>
-        )}
-        <Form.Item name="order" label="Thứ tự">
-          <InputNumber min={1} style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="status" label="Trạng thái">
+        <Form.Item name="is_active" label="Trạng thái">
           <Select options={[
-            { value: 'ACTIVE',   label: 'Đang sử dụng' },
-            { value: 'INACTIVE', label: 'Ngừng sử dụng' },
+            { value: true, label: 'Đang sử dụng' },
+            { value: false, label: 'Ngừng sử dụng' },
           ]} />
         </Form.Item>
       </Form>
@@ -128,124 +86,106 @@ function RowModal({
   )
 }
 
-// ─── Section content ──────────────────────────────────────────────────────────
-function SectionContent({ section }: { section: typeof NAV_ITEMS[0] }) {
+function SourceGroupSection() {
   const { message } = App.useApp()
-  const [data, setData] = useState<any[]>(INIT[section.key] ?? [])
+  const [data, setData] = useState<ApiSourceGroup[]>([])
+  const [loading, setLoading] = useState(true)
   const [keyword, setKeyword] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
-  const [sortOrder, setSortOrder] = useState('asc')
   const [modalOpen, setModalOpen] = useState(false)
-  const [editing, setEditing] = useState<any | null>(null)
+  const [editing, setEditing] = useState<ApiSourceGroup | null>(null)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    authFetch('/api/source-groups?include_inactive=true')
+      .then(res => (res.ok ? res.json() : Promise.reject(res)))
+      .then(d => setData(d.source_groups ?? []))
+      .catch(() => message.error('Không tải được danh sách nhóm nguồn'))
+      .finally(() => setLoading(false))
+  }, [message])
+
+  useEffect(() => { load() }, [load])
 
   const filtered = useMemo(() => {
     let list = [...data]
-    if (keyword) list = list.filter(r => r.name.toLowerCase().includes(keyword.toLowerCase()) || r.code.toLowerCase().includes(keyword.toLowerCase()))
-    if (statusFilter) list = list.filter(r => r.status === statusFilter)
-    list.sort((a, b) => sortOrder === 'asc' ? a.order - b.order : b.order - a.order)
+    if (keyword) list = list.filter(r => r.name.toLowerCase().includes(keyword.toLowerCase()))
+    if (statusFilter) list = list.filter(r => (statusFilter === 'ACTIVE' ? r.is_active : !r.is_active))
     return list
-  }, [data, keyword, statusFilter, sortOrder])
+  }, [data, keyword, statusFilter])
 
-  // Lưu/sửa chỉ cập nhật state cục bộ — trang mock thuần, không có backend thật
-  const handleSave = (values: any) => {
-    const now = dayjs().format('DD/MM/YYYY HH:mm')
-    if (editing) {
-      setData(prev => prev.map(r => r.id === editing.id ? { ...r, ...values, updated_at: now } : r))
-      message.success('Đã cập nhật')
-    } else {
-      setData(prev => [...prev, { ...values, id: String(Date.now()), updated_at: now }])
-      message.success('Đã thêm mới')
+  const handleSave = async (values: { name: string; is_active: boolean }) => {
+    try {
+      if (editing) {
+        const res = await authFetch(`/api/source-groups/${editing.group_id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values),
+        })
+        if (!res.ok) throw new Error()
+        message.success('Đã cập nhật nhóm nguồn')
+      } else {
+        const res = await authFetch('/api/source-groups', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: values.name }),
+        })
+        if (!res.ok) throw new Error()
+        message.success('Đã thêm nhóm nguồn')
+      }
+      setModalOpen(false)
+      setEditing(null)
+      load()
+    } catch {
+      message.error('Không lưu được nhóm nguồn')
     }
-    message.info('Đây là giao diện minh hoạ — chưa lưu được thật')
-    setModalOpen(false)
-    setEditing(null)
   }
-
-  const hasColor = HAS_COLOR.includes(section.key)
-  const hasScore = HAS_SCORE.includes(section.key)
 
   const columns = [
     {
       title: 'STT', width: 56,
-      render: (_: any, __: any, i: number) => (
-        <Text type="secondary" style={{ fontSize: 13 }}>{i + 1}</Text>
-      ),
+      render: (_: any, __: any, i: number) => <Text type="secondary" style={{ fontSize: 13 }}>{i + 1}</Text>,
     },
     {
-      title: section.codeLabel, dataIndex: 'code', key: 'code', width: 120,
-      render: (v: string) => <Tag style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</Tag>,
-    },
-    {
-      title: section.nameLabel, dataIndex: 'name', key: 'name',
+      title: 'Tên nhóm nguồn', dataIndex: 'name', key: 'name',
       render: (v: string) => <Text strong style={{ fontSize: 13 }}>{v}</Text>,
     },
     {
-      title: 'Mô tả', dataIndex: 'desc', key: 'desc',
-      ellipsis: true,
-      render: (v: string) => <Text type="secondary" style={{ fontSize: 13 }}>{v}</Text>,
-    },
-    ...(hasScore ? [
-      { title: 'Điểm min', dataIndex: 'min_score', key: 'min_score', width: 88, render: (v: number) => <Text>{v}</Text> },
-      { title: 'Điểm max', dataIndex: 'max_score', key: 'max_score', width: 88, render: (v: number) => <Text>{v}</Text> },
-    ] : []),
-    ...(hasColor ? [
-      {
-        title: 'Màu', dataIndex: 'color', key: 'color', width: 80,
-        render: (v: string) => (
-          <div style={{ width: 28, height: 20, borderRadius: 4, background: v, border: '1px solid #e0e0e0' }} />
-        ),
-      },
-    ] : []),
-    {
-      title: 'Thứ tự', dataIndex: 'order', key: 'order', width: 72,
-      render: (v: number) => <Text style={{ fontSize: 13 }}>{v}</Text>,
+      title: 'Trạng thái', dataIndex: 'is_active', key: 'is_active', width: 130,
+      render: (v: boolean) => <StatusTag value={v ? 'ACTIVE' : 'INACTIVE'} />,
     },
     {
-      title: 'Trạng thái', dataIndex: 'status', key: 'status', width: 130,
-      render: (v: string) => <StatusTag value={v} />,
-    },
-    {
-      title: 'Cập nhật lúc', dataIndex: 'updated_at', key: 'updated_at', width: 140,
-      render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{v}</Text>,
-    },
-    {
-      title: 'Thao tác', key: 'actions', width: 56,
-      render: (_: any, r: any) => (
-        <Tooltip title="Sửa">
-          <Button type="text" size="small" icon={<EditOutlined style={{ color: '#1677ff' }} />}
-            onClick={() => { setEditing(r); setModalOpen(true) }} />
-        </Tooltip>
+      title: 'Thao tác', key: 'actions', width: 90, align: 'center' as const,
+      render: (_: any, r: ApiSourceGroup) => (
+        <PermissionGuard permission="source.update">
+          <Tooltip title="Sửa">
+            <Button type="text" size="small" icon={<EditOutlined style={{ color: '#1677ff' }} />}
+              onClick={() => { setEditing(r); setModalOpen(true) }} />
+          </Tooltip>
+        </PermissionGuard>
       ),
     },
   ]
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
         <div>
-          <Title level={4} style={{ margin: '0 0 4px', color: '#0A1D55' }}>
-            Danh mục {section.label.toLowerCase()}
-          </Title>
+          <Title level={4} style={{ margin: '0 0 4px', color: '#0A1D55' }}>Danh mục nhóm nguồn</Title>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            Quản lý các {section.label.toLowerCase()} dùng chung trong hệ thống.
+            Nhóm nguồn dùng để phân loại Nguồn dữ liệu (VD: Chính phủ, Bộ ngành, Báo chí).
           </Text>
         </div>
-        <Space>
-          <Button icon={<DownloadOutlined />}>Xuất Excel</Button>
-          <Button icon={<UploadOutlined />}>Nhập Excel</Button>
-          <Button type="primary" icon={<PlusOutlined />}
-            onClick={() => { setEditing(null); setModalOpen(true) }}>
-            Thêm mới
+        <PermissionGuard permission="source.create">
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); setModalOpen(true) }}>
+            Thêm nhóm nguồn
           </Button>
-        </Space>
+        </PermissionGuard>
       </div>
 
-      {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
         <Input
           prefix={<SearchOutlined style={{ color: '#8c8c8c' }} />}
-          placeholder={`Tìm kiếm theo tên ${section.label.toLowerCase()}...`}
+          placeholder="Tìm kiếm nhóm nguồn..."
           value={keyword}
           onChange={e => setKeyword(e.target.value)}
           allowClear
@@ -256,34 +196,25 @@ function SectionContent({ section }: { section: typeof NAV_ITEMS[0] }) {
           onChange={setStatusFilter}
           style={{ width: 160 }}
           options={[
-            { value: '',         label: 'Trạng thái: Tất cả' },
-            { value: 'ACTIVE',   label: 'Đang sử dụng' },
+            { value: '', label: 'Trạng thái: Tất cả' },
+            { value: 'ACTIVE', label: 'Đang sử dụng' },
             { value: 'INACTIVE', label: 'Ngừng sử dụng' },
           ]}
         />
-        <Select
-          value={sortOrder}
-          onChange={setSortOrder}
-          style={{ width: 200 }}
-          options={[
-            { value: 'asc',  label: 'Sắp xếp: Thứ tự tăng dần' },
-            { value: 'desc', label: 'Sắp xếp: Thứ tự giảm dần' },
-          ]}
-        />
         <Tooltip title="Làm mới">
-          <Button icon={<ReloadOutlined />} onClick={() => { setKeyword(''); setStatusFilter(''); setSortOrder('asc') }} />
+          <Button icon={<ReloadOutlined />} onClick={load} />
         </Tooltip>
       </div>
 
-      {/* Table */}
       <div style={{ flex: 1, overflow: 'auto' }}>
         <Table
           columns={columns}
           dataSource={filtered}
-          rowKey="id"
+          rowKey="group_id"
           size="middle"
-          scroll={{ x: 900 }}
-          locale={{ emptyText: <EmptyState description={`Chưa có dữ liệu mẫu cho ${section.label.toLowerCase()}`} /> }}
+          loading={loading}
+          scroll={{ x: 500 }}
+          locale={{ emptyText: <EmptyState description="Chưa có nhóm nguồn nào" /> }}
           pagination={{
             pageSize: 20,
             showTotal: (total, [s, e]) => `Hiển thị ${s} - ${e} của ${total} bản ghi`,
@@ -293,9 +224,8 @@ function SectionContent({ section }: { section: typeof NAV_ITEMS[0] }) {
         />
       </div>
 
-      <RowModal
+      <SourceGroupModal
         open={modalOpen}
-        section={section}
         initial={editing}
         onOk={handleSave}
         onCancel={() => { setModalOpen(false); setEditing(null) }}
@@ -304,10 +234,250 @@ function SectionContent({ section }: { section: typeof NAV_ITEMS[0] }) {
   )
 }
 
+// ─── Từ khóa — nối API thật (GET/POST/PUT /api/keywords) ──────────────────────
+function KeywordModal({
+  open, initial, topicGroups, onOk, onCancel,
+}: {
+  open: boolean
+  initial: ApiKeyword | null
+  topicGroups: string[]
+  onOk: (v: { keyword: string; topic_group?: string; is_active: boolean }) => void
+  onCancel: () => void
+}) {
+  const [form] = Form.useForm()
+
+  const handleOk = () => {
+    form.validateFields().then(v => onOk(v))
+  }
+
+  const initVals = initial
+    ? { keyword: initial.keyword, topic_group: initial.topic_group ?? undefined, is_active: initial.is_active }
+    : { is_active: true }
+
+  return (
+    <Modal
+      title={initial ? 'Sửa từ khóa' : 'Thêm từ khóa'}
+      open={open} onOk={handleOk} onCancel={onCancel}
+      okText="Lưu" cancelText="Huỷ" width={520}
+      afterOpenChange={o => { if (o) form.setFieldsValue(initVals) }}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
+        <Form.Item name="keyword" label="Từ khóa" rules={[{ required: true, message: 'Từ khóa không được để trống' }]}>
+          <Input placeholder="VD: tin giả y tế" />
+        </Form.Item>
+        <Form.Item name="topic_group" label="Nhóm chủ đề">
+          <Select allowClear placeholder="Chọn nhóm chủ đề" options={topicGroups.map(t => ({ value: t, label: t }))} />
+        </Form.Item>
+        <Form.Item name="is_active" label="Trạng thái">
+          <Select options={[
+            { value: true, label: 'Đang sử dụng' },
+            { value: false, label: 'Ngừng sử dụng' },
+          ]} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+function KeywordSection() {
+  const { message } = App.useApp()
+  const topicGroups = useTopicGroups()
+  const [data, setData] = useState<ApiKeyword[]>([])
+  const [loading, setLoading] = useState(true)
+  const [keyword, setKeyword] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState<ApiKeyword | null>(null)
+
+  const load = useCallback(() => {
+    setLoading(true)
+    authFetch('/api/keywords?include_inactive=true')
+      .then(res => (res.ok ? res.json() : Promise.reject(res)))
+      .then(d => setData(d.keywords ?? []))
+      .catch(() => message.error('Không tải được danh sách từ khóa'))
+      .finally(() => setLoading(false))
+  }, [message])
+
+  useEffect(() => { load() }, [load])
+
+  const filtered = useMemo(() => {
+    let list = [...data]
+    if (keyword) list = list.filter(r => r.keyword.toLowerCase().includes(keyword.toLowerCase()))
+    if (statusFilter) list = list.filter(r => (statusFilter === 'ACTIVE' ? r.is_active : !r.is_active))
+    return list
+  }, [data, keyword, statusFilter])
+
+  const handleSave = async (values: { keyword: string; topic_group?: string; is_active: boolean }) => {
+    try {
+      if (editing) {
+        const res = await authFetch(`/api/keywords/${editing.keyword_id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(values),
+        })
+        if (!res.ok) throw new Error()
+        message.success('Đã cập nhật từ khóa')
+      } else {
+        const res = await authFetch('/api/keywords', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ keyword: values.keyword, topic_group: values.topic_group }),
+        })
+        if (!res.ok) throw new Error()
+        message.success('Đã thêm từ khóa')
+      }
+      setModalOpen(false)
+      setEditing(null)
+      load()
+    } catch {
+      message.error('Không lưu được từ khóa')
+    }
+  }
+
+  const columns = [
+    {
+      title: 'STT', width: 56,
+      render: (_: any, __: any, i: number) => <Text type="secondary" style={{ fontSize: 13 }}>{i + 1}</Text>,
+    },
+    {
+      title: 'Từ khóa', dataIndex: 'keyword', key: 'keyword',
+      render: (v: string) => <Text strong style={{ fontSize: 13 }}>{v}</Text>,
+    },
+    {
+      title: 'Nhóm chủ đề', dataIndex: 'topic_group', key: 'topic_group',
+      render: (v: string | null) => v ? <Tag style={{ fontSize: 12 }}>{v}</Tag> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Trạng thái', dataIndex: 'is_active', key: 'is_active', width: 130,
+      render: (v: boolean) => <StatusTag value={v ? 'ACTIVE' : 'INACTIVE'} />,
+    },
+    {
+      title: 'Thao tác', key: 'actions', width: 90, align: 'center' as const,
+      render: (_: any, r: ApiKeyword) => (
+        <PermissionGuard permission="campaign.update">
+          <Tooltip title="Sửa">
+            <Button type="text" size="small" icon={<EditOutlined style={{ color: '#1677ff' }} />}
+              onClick={() => { setEditing(r); setModalOpen(true) }} />
+          </Tooltip>
+        </PermissionGuard>
+      ),
+    },
+  ]
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+        <div>
+          <Title level={4} style={{ margin: '0 0 4px', color: '#0A1D55' }}>Danh mục từ khóa</Title>
+          <Text type="secondary" style={{ fontSize: 13 }}>
+            Từ khóa dùng để lọc phạm vi nội dung cho các Chiến dịch (Campaign).
+          </Text>
+        </div>
+        <PermissionGuard permission="campaign.create">
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditing(null); setModalOpen(true) }}>
+            Thêm từ khóa
+          </Button>
+        </PermissionGuard>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+        <Input
+          prefix={<SearchOutlined style={{ color: '#8c8c8c' }} />}
+          placeholder="Tìm kiếm từ khóa..."
+          value={keyword}
+          onChange={e => setKeyword(e.target.value)}
+          allowClear
+          style={{ width: 300 }}
+        />
+        <Select
+          value={statusFilter}
+          onChange={setStatusFilter}
+          style={{ width: 160 }}
+          options={[
+            { value: '', label: 'Trạng thái: Tất cả' },
+            { value: 'ACTIVE', label: 'Đang sử dụng' },
+            { value: 'INACTIVE', label: 'Ngừng sử dụng' },
+          ]}
+        />
+        <Tooltip title="Làm mới">
+          <Button icon={<ReloadOutlined />} onClick={load} />
+        </Tooltip>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <Table
+          columns={columns}
+          dataSource={filtered}
+          rowKey="keyword_id"
+          size="middle"
+          loading={loading}
+          scroll={{ x: 700 }}
+          locale={{ emptyText: <EmptyState description="Chưa có từ khóa nào" /> }}
+          pagination={{
+            pageSize: 20,
+            showTotal: (total, [s, e]) => `Hiển thị ${s} - ${e} của ${total} bản ghi`,
+            showSizeChanger: true,
+            pageSizeOptions: ['10', '20', '50'],
+          }}
+        />
+      </div>
+
+      <KeywordModal
+        open={modalOpen}
+        initial={editing}
+        topicGroups={topicGroups}
+        onOk={handleSave}
+        onCancel={() => { setModalOpen(false); setEditing(null) }}
+      />
+    </div>
+  )
+}
+
+// ─── Nhóm chủ đề — CHỈ ĐỌC (GET /api/topic-groups), không có nút Thêm/Sửa/Xóa nào —
+// đây là hằng số gắn với prompt AI, không phải danh mục CRUD được (xem comment ở
+// useTopicGroups phía trên) ────────────────────────────────────────────────────
+function TopicGroupSection() {
+  const topicGroups = useTopicGroups()
+
+  const columns = [
+    {
+      title: 'STT', width: 56,
+      render: (_: any, __: any, i: number) => <Text type="secondary" style={{ fontSize: 13 }}>{i + 1}</Text>,
+    },
+    {
+      title: 'Tên nhóm chủ đề', dataIndex: 'name', key: 'name',
+      render: (v: string) => <Text strong style={{ fontSize: 13 }}>{v}</Text>,
+    },
+  ]
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ marginBottom: 16 }}>
+        <Title level={4} style={{ margin: '0 0 4px', color: '#0A1D55' }}>Danh mục nhóm chủ đề</Title>
+        <Text type="secondary" style={{ fontSize: 13 }}>
+          Nhóm chủ đề dùng để AI phân loại nội dung — gắn liền với prompt AI đang chạy,
+          chỉ xem để biết hệ thống đang phân loại theo những nhóm nào, không chỉnh sửa được qua đây.
+        </Text>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto' }}>
+        <Table
+          columns={columns}
+          dataSource={topicGroups.map((name, i) => ({ name, key: i }))}
+          rowKey="key"
+          size="middle"
+          locale={{ emptyText: <EmptyState description="Chưa tải được danh sách nhóm chủ đề" /> }}
+          pagination={false}
+        />
+      </div>
+    </div>
+  )
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function MasterDataPage() {
-  const [activeKey, setActiveKey] = useState('topic')
-  const section = NAV_ITEMS.find(n => n.key === activeKey) ?? NAV_ITEMS[0]
+  const [activeKey, setActiveKey] = useState('source_group')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)' }}>
@@ -360,7 +530,9 @@ export default function MasterDataPage() {
           border: '1px solid #f0f0f0', padding: '20px 24px',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
         }}>
-          <SectionContent key={activeKey} section={section} />
+          {activeKey === 'keyword' && <KeywordSection key={activeKey} />}
+          {activeKey === 'source_group' && <SourceGroupSection key={activeKey} />}
+          {activeKey === 'topic_group' && <TopicGroupSection key={activeKey} />}
         </div>
       </div>
     </div>

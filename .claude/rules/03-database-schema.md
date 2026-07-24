@@ -108,17 +108,34 @@ CREATE TABLE sources (
     created_at    TIMESTAMP DEFAULT NOW(),
 
     -- [ĐÃ CODE] — cột bổ sung cho crawl liên tục theo lịch (xem 17-continuous-crawler-scheduler.md)
-    source_group        VARCHAR(255),           -- nhóm nguồn dùng chung (Chính phủ/Bộ ngành/Báo chí...) — Phase 2 (migration 0017)
+    source_group        VARCHAR(255),           -- tên 1 Nhóm nguồn active trong bảng source_groups bên
+                                                   -- dưới (Phase 2, migration 0017) — validate ở tầng API
+                                                   -- (PUT /api/sources/{id}, 2026-07-24), KHÔNG phải FK cứng
     crawl_frequency      INTEGER DEFAULT 1800,   -- giây, mặc định 30 phút cho báo điện tử — Phase 3 (migration 0018)
     last_crawled_at       TIMESTAMP,             -- Phase 3
     status                VARCHAR(30) DEFAULT 'ACTIVE',  -- ACTIVE|INACTIVE|ERROR, thay thế is_active
                                                            -- cho mục đích crawl tự động (BR-SRC-03) — Phase 3
-    consecutive_error_count INTEGER DEFAULT 0    -- đếm số chu kỳ Fetch liên tiếp không fetch được bài
+    consecutive_error_count INTEGER DEFAULT 0,   -- đếm số chu kỳ Fetch liên tiếp không fetch được bài
                                                    -- nào (chỉ tính khi crawl_queue có URL để thử — nguồn
                                                    -- đăng bài thưa không bị tính lỗi oan); >10 → tự chuyển
                                                    -- status=ERROR (BR-SRC-03). Cột này KHÔNG có trong thiết
                                                    -- kế BR-SRC-03 gốc, bổ sung khi code Phase 3 vì cần 1 nơi
                                                    -- lưu trạng thái đếm — Phase 3 (migration 0018)
+    discover_backfilled_from TIMESTAMP,          -- "mốc nước cao nhất" Discover CONTINUOUS đã quét xong,
+                                                   -- chỉ tiến không lùi — migration 0025 (2026-07-23)
+    crawl_started_at     TIMESTAMP               -- cờ "đang quét" (đặt lúc crawl_task bắt đầu, xóa về NULL
+                                                   -- lúc xong dù thành công/lỗi) — migration 0026 (2026-07-24)
+);
+
+-- [ĐÃ CODE — 2026-07-24] Danh mục Nhóm nguồn chuẩn hóa (BR-SRC-01: mỗi Nguồn thuộc đúng 1
+-- Nhóm nguồn, VD Chính phủ/Bộ ngành/Báo chí) — sources.source_group ở trên validate theo
+-- đúng bảng này (tên phải khớp 1 dòng is_active=true), không phải FK cứng để tránh ảnh
+-- hưởng rộng tới các nơi đang đọc sources.source_group dạng chuỗi tự do
+CREATE TABLE source_groups (
+    group_id   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name       VARCHAR(255) NOT NULL UNIQUE,
+    is_active  BOOLEAN DEFAULT true,
+    created_at TIMESTAMP DEFAULT NOW()
 );
 ```
 
@@ -126,9 +143,9 @@ CREATE TABLE sources (
 
 ---
 
-## Nhóm: Chiến dịch giám sát (Campaign) — `[CHƯA CODE]`, thay thế hoàn toàn bảng `jobs`
+## Nhóm: Chiến dịch giám sát (Campaign) — `[ĐÃ CODE — Phase 2]`, đã thay thế hoàn toàn bảng `jobs`
 
-> **Quan trọng:** đây không phải "tính năng thêm sau MVP" — mô hình "Job đơn lẻ chạy 1 lần" (bên dưới) là cách hiểu nghiệp vụ **ban đầu chưa đúng/chưa đủ** so với nhu cầu thật (giám sát liên tục, xem [01 · Project Overview](01-project-overview.md)). `campaigns` là mô hình đúng, `jobs` sẽ bị xóa hẳn khi migrate — không giữ 2 hệ thống song song. Business rules đầy đủ (BR-CAMP): xem [16 · Campaign Management](16-campaign-management.md).
+> **Quan trọng:** đây không phải "tính năng thêm sau MVP" — mô hình "Job đơn lẻ chạy 1 lần" (bên dưới, **đã bị xóa hẳn khỏi DB từ migration `0021`**) là cách hiểu nghiệp vụ **ban đầu chưa đúng/chưa đủ** so với nhu cầu thật (giám sát liên tục, xem [01 · Project Overview](01-project-overview.md)). `campaigns` là mô hình đúng, đang chạy thật — không còn giữ 2 hệ thống song song. Business rules đầy đủ (BR-CAMP): xem [16 · Campaign Management](16-campaign-management.md).
 
 ```sql
 CREATE TABLE campaigns (
@@ -202,7 +219,9 @@ CREATE TABLE campaign_article_keywords (
 );
 ```
 
-### Bảng `jobs` — `[ĐÃ CODE — sẽ bị XÓA khi migrate sang campaigns]`
+### Bảng `jobs` — `[ĐÃ XÓA HẲN — migration 0021, 2026-07-XX]`
+
+> Bảng này **không còn tồn tại trong DB** — giữ lại định nghĩa dưới đây chỉ để tham khảo lịch sử (hiểu vì sao `articles.job_id`/`article_analysis.job_id`/`report_history.job_id` từng có, và migration 0021 đã hard-delete toàn bộ dữ liệu `jobs`/`report_history` cũ liên quan trước khi drop bảng). Router `reports.py` cũ và mô hình "1 Job = 1 lần crawl" cũng đã bị xóa cùng đợt (Phase 7) — xem [08 · DOCX Report](08-docx-report.md).
 
 ```sql
 CREATE TABLE jobs (

@@ -14,6 +14,10 @@ type Source = {
   source_group: string | null;
   crawl_frequency: number | null;
   status: string | null;
+  sitemap_url: string | null;
+  parsing_rules: Record<string, unknown> | null;
+  last_crawled_at: string | null;
+  discover_backfilled_from: string | null;
 };
 
 export default function SourcesPage() {
@@ -67,7 +71,8 @@ export default function SourcesPage() {
     {
       title: "Thao tác",
       key: "actions",
-      width: 140,
+      width: 120,
+      align: "center" as const,
       render: (_: unknown, r: Source) => (
         <Space>
           <Tooltip title="Chưa triển khai — CRUD nguồn qua UI thuộc phạm vi Slice 6, chưa code">

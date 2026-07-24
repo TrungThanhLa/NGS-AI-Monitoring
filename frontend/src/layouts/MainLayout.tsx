@@ -13,7 +13,6 @@ import {
   WarningOutlined,
   SafetyCertificateOutlined,
   BarChartOutlined,
-  CalendarOutlined,
   SettingOutlined,
   UserOutlined,
   MenuFoldOutlined,
@@ -32,7 +31,6 @@ const MENU_ITEMS = [
   { key: "/alerts", icon: <WarningOutlined />, label: "Cảnh báo" },
   { key: "/cases", icon: <SafetyCertificateOutlined />, label: "Vụ việc" },
   { key: "/reports", icon: <BarChartOutlined />, label: "Báo cáo" },
-  { key: "/jobs", icon: <CalendarOutlined />, label: "Lịch chạy & Jobs" },
   {
     key: "/system",
     icon: <SettingOutlined />,

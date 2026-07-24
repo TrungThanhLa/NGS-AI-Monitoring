@@ -13,6 +13,7 @@ from backend.models.permissions import Permission
 from backend.models.report_history import ReportHistory
 from backend.models.role_permissions import RolePermission
 from backend.models.roles import Role
+from backend.models.source_groups import SourceGroup
 from backend.models.sources import Source
 from backend.models.system_settings import SystemSetting
 from backend.models.user_roles import UserRole
@@ -38,4 +39,5 @@ __all__ = [
     "CampaignArticle",
     "CampaignArticleKeyword",
     "CampaignCrawlProgress",
+    "SourceGroup",
 ]

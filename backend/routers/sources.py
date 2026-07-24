@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from backend.audit.logger import log_action
 from backend.auth.dependencies import require_permission
 from backend.db import get_db
-from backend.models import Source, User
+from backend.models import Source, SourceGroup, User
 
 router = APIRouter(prefix="/api/sources", tags=["sources"])
 
@@ -33,6 +33,10 @@ def list_sources(db: Session = Depends(get_db), _user=Depends(require_permission
                 "source_group": s.source_group,
                 "crawl_frequency": s.crawl_frequency,
                 "status": s.status,
+                "sitemap_url": s.sitemap_url,
+                "parsing_rules": s.parsing_rules,
+                "last_crawled_at": s.last_crawled_at,
+                "discover_backfilled_from": s.discover_backfilled_from,
             }
             for s in rows
         ]
@@ -70,6 +74,13 @@ def update_source(
             status_code=400,
             detail=f"crawl_frequency phải >= {_MIN_CRAWL_FREQUENCY_SECONDS} giây (tránh spam request)",
         )
+    # source_group phải khớp đúng tên 1 Nhóm nguồn đang active trong bảng source_groups
+    # (BR-SRC-01) — không cho gõ tay tự do nữa, tránh trôi dạt dữ liệu (typo, viết hoa/
+    # thường khác nhau cho cùng 1 nhóm)
+    if payload.source_group is not None:
+        valid = db.query(SourceGroup).filter_by(name=payload.source_group, is_active=True).first()
+        if valid is None:
+            raise HTTPException(status_code=400, detail="Nhóm nguồn không hợp lệ hoặc đã ngừng dùng")
 
     old_value = {
         "source_group": source.source_group,
